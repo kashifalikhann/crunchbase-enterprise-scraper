@@ -164,18 +164,28 @@ export async function fetchCrunchbaseViaProxy(url: string): Promise<string | nul
   try {
     if (!proxyContext) {
       const b = await getOrLaunchBrowser();
-      const proxyConfig = await Actor.createProxyConfiguration({ groups: ['RESIDENTIAL'] });
+
+      const proxyConfig = await Actor.createProxyConfiguration();
       if (!proxyConfig) {
-        log.warning('Apify proxy configuration not available');
-        return null;
+        log.info('No Apify proxy available, trying direct HTTP fetch');
+        return fetchDirect(url);
       }
+
       const pUrl = await proxyConfig.newUrl();
       if (!pUrl) {
-        log.warning('Apify proxy URL not available');
-        return null;
+        log.info('No proxy URL, trying direct HTTP fetch');
+        return fetchDirect(url);
       }
+
+      const parsed = new URL(pUrl);
+      log.info(`Creating proxy context using group: ${parsed.username}`);
+
       proxyContext = await b.newContext({
-        proxy: { server: pUrl },
+        proxy: {
+          server: `${parsed.protocol}//${parsed.hostname}:${parsed.port}`,
+          username: parsed.username,
+          password: parsed.password,
+        },
         userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
         locale: 'en-US',
         extraHTTPHeaders: {
@@ -200,9 +210,34 @@ export async function fetchCrunchbaseViaProxy(url: string): Promise<string | nul
     }
 
     log.info(`Proxy fetch OK: ${url.substring(0, 80)}`);
-    return await resp.text();
+    const html = await resp.text();
+    if (html.includes('Just a moment') || html.includes('Checking your browser')) {
+      log.warning('Proxy fetch hit Cloudflare challenge page');
+      return null;
+    }
+    return html;
   } catch (err) {
     log.warning(`Proxy fetch failed: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
+}
+
+async function fetchDirect(url: string): Promise<string | null> {
+  try {
+    const resp = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
+      signal: AbortSignal.timeout(15000),
+    });
+    log.info(`Direct fetch returned ${resp.status} for ${url.substring(0, 80)}`);
+    if (!resp.ok) return null;
+    const html = await resp.text();
+    if (html.includes('__NEXT_DATA__')) return html;
+    return null;
+  } catch {
     return null;
   }
 }
