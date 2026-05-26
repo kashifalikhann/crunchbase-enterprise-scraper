@@ -6,23 +6,43 @@
     "mode": {
       "title": "Scraping Mode",
       "type": "string",
-      "description": "urls: scrape specific URLs. search: find companies by filters. hybrid: search + auto-scrape each result.",
-      "default": "hybrid",
-      "enum": ["urls", "search", "hybrid"],
-      "enumTitles": ["URLs only", "Search only", "Search + Scrape"]
+      "description": "urls: scrape specific company URLs. search: find companies by filters.",
+      "default": "urls",
+      "enum": ["urls", "search"],
+      "enumTitles": ["URLs only", "Search only"]
     },
     "startUrls": {
       "title": "Company URLs",
       "type": "array",
-      "description": "Crunchbase company URLs to scrape (for urls/hybrid mode). Supports organization, company, or person URLs.",
+      "description": "Crunchbase company URLs to scrape (for urls mode). Supports organization, company, or person URLs.",
       "editor": "requestListSources"
     },
     "searchQueries": {
       "title": "Search Keywords",
       "type": "array",
-      "description": "Search Crunchbase by keyword (for search/hybrid mode). Combine with filters below.",
+      "description": "Search Crunchbase by keyword (for search mode). Combine with filters below. Uses official API (if key provided) or discover page (if CapSolver).",
       "editor": "stringList",
-      "prefill": ["AI startup", "fintech SaaS"]
+      "prefill": ["AI startup"]
+    },
+    "capsolverApiKey": {
+      "title": "CapSolver API Key",
+      "type": "string",
+      "description": "CapSolver API key for Cloudflare Turnstile bypass. Get from https://dashboard.capsolver.com. After solving, the actor makes direct HTTP API calls without a browser — faster and cheaper.",
+      "editor": "textfield",
+      "isSecret": true
+    },
+    "capsolverProxy": {
+      "title": "CapSolver Proxy",
+      "type": "string",
+      "description": "Optional proxy for CapSolver (format: http://user:pass@host:port). Uses Apify proxy by default.",
+      "editor": "textfield"
+    },
+    "crunchbaseApiKey": {
+      "title": "Crunchbase API Key",
+      "type": "string",
+      "description": "Optional Crunchbase API v4 key for authorized access. Get from https://www.crunchbase.com/settings/api ($49/mo Basic plan required). When set, search uses the official API which bypasses Cloudflare entirely.",
+      "editor": "textfield",
+      "isSecret": true
     },
     "location": {
       "title": "Location Filter",
@@ -98,26 +118,11 @@
       "description": "Extract similar/competitor companies",
       "default": true
     },
-    "crunchbaseApiKey": {
-      "title": "Crunchbase API Key",
-      "type": "string",
-      "description": "Optional Crunchbase API v4 key for authorized search. Get from https://www.crunchbase.com/settings/api. When set, search uses the official API instead of browser scraping.",
-      "editor": "textfield",
-      "isSecret": true
-    },
     "extractContacts": {
       "title": "Extract Contact Info",
       "type": "boolean",
       "description": "Extract contact email and phone number when available",
       "default": true
-    },
-    "concurrency": {
-      "title": "Concurrency",
-      "type": "integer",
-      "description": "Browser concurrency level (1-10)",
-      "default": 3,
-      "minimum": 1,
-      "maximum": 10
     },
     "maxRetries": {
       "title": "Max Retries per URL",
@@ -127,24 +132,19 @@
       "minimum": 0,
       "maximum": 10
     },
-    "proxyConfiguration": {
-      "title": "Proxy Configuration",
-      "type": "object",
-      "description": "Residential proxies strongly recommended for Crunchbase (datacenter IPs get blocked)",
-      "editor": "proxy",
-      "default": { "useApifyProxy": true, "apifyProxyGroups": ["RESIDENTIAL"] }
-    },
-    "screenshot": {
-      "title": "Capture Screenshots",
-      "type": "boolean",
-      "description": "Capture a screenshot of each company page (stored in key-value store)",
-      "default": false
-    },
     "webhookUrl": {
       "title": "Webhook URL",
       "type": "string",
       "description": "POST URL for progress notifications. Receives JSON with stats every 10 companies.",
       "editor": "textfield"
+    },
+    "outputFormat": {
+      "title": "Output Format",
+      "type": "string",
+      "description": "Output format for the dataset",
+      "enum": ["json", "csv"],
+      "enumTitles": ["JSON", "CSV"],
+      "default": "json"
     }
   },
   "required": []

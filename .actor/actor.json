@@ -2,10 +2,9 @@
   "actorSpecification": 1,
   "name": "crunchbase-enterprise-scraper",
   "title": "Crunchbase Enterprise Scraper",
-  "description": "Enterprise-grade Crunchbase scraper — 65+ data fields, __NEXT_DATA__ parsing, Google fallback, checkpoint resume, concurrency pool, webhook notifications, and RESIDENTIAL proxy support.",
-  "version": "1.0",
+  "description": "Enterprise-grade Crunchbase scraper — CapSolver-powered Cloudflare bypass, official API support, 65+ data fields, direct API extraction, checkpoint resume, and webhook notifications.",
+  "version": "2.0",
   "meta": {
-    "templateId": "ts-crawlee-playwright",
     "generatedBy": "Claude Code with big-pickle"
   },
   "input": "./input_schema.json",

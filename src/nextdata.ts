@@ -1,5 +1,3 @@
-import { Page } from 'playwright';
-
 export interface NextDataProps {
   pageProps?: {
     pageContext?: {
@@ -14,13 +12,11 @@ export interface NextDataProps {
   };
 }
 
-export async function extractNextData<T = NextDataProps>(page: Page): Promise<T | null> {
+export function extractNextDataFromHtml(html: string): NextDataProps | null {
   try {
-    return await page.evaluate(() => {
-      const el = document.getElementById('__NEXT_DATA__');
-      if (!el?.textContent) return null;
-      return JSON.parse(el.textContent);
-    });
+    const match = html.match(/<script id="__NEXT_DATA__"[^>]*type="application\/json"[^>]*>([\s\S]*?)<\/script>/);
+    if (!match?.[1]) return null;
+    return JSON.parse(match[1]);
   } catch {
     return null;
   }
@@ -136,7 +132,10 @@ export function parseNextDataCompanyProps(nextData: NextDataProps): RawCompanyPr
   }
 }
 
-export function parseNextDataPeople(nextData: NextDataProps, peopleType: 'founders' | 'executives' | 'board_members' | 'board_members_and_advisors' = 'founders'): RawPerson[] {
+export function parseNextDataPeople(
+  nextData: NextDataProps,
+  peopleType: 'founders' | 'executives' | 'board_members' | 'board_members_and_advisors' = 'founders',
+): RawPerson[] {
   try {
     const cards = nextData?.pageProps?.pageContext?.entity?.cards;
     if (!cards) return [];

@@ -1,34 +1,18 @@
-import { Page } from 'playwright';
 import { FundingRound } from '../types.js';
-import { extractCurrencyAmountFromDOM } from '../utils.js';
+import { parseNextDataFundingRounds } from '../nextdata.js';
 
-export async function extractFundingRoundsFromDOM(page: Page): Promise<FundingRound[]> {
-  try {
-    return await page.evaluate(() => {
-      const sections = document.querySelectorAll('[class*="funding"]');
-      for (const section of sections) {
-        const header = section.querySelector('h2, h3, [class*="title"]');
-        if (!header?.textContent?.toLowerCase().includes('funding')) continue;
+export function extractFundingRoundsFromNextData(nextData: any, maxRounds?: number): FundingRound[] {
+  const fundingData = parseNextDataFundingRounds(nextData);
+  const rounds = fundingData.map(r => ({
+    name: r.type || r.name,
+    date: r.announced_on,
+    type: r.type,
+    amount: r.money_raised_usd,
+    valuation: r.pre_money_valuation_usd || r.post_money_valuation_usd,
+    leadInvestors: r.lead_investors?.map(i => i?.identifier?.value).filter(Boolean) as string[],
+    investors: r.investors?.map(i => i?.identifier?.value).filter(Boolean) as string[],
+  }));
 
-        const rows = section.querySelectorAll('[class*="row"], tr, [class*="item"]');
-        if (!rows.length) continue;
-
-        return Array.from(rows).map(row => {
-          const cells = row.querySelectorAll('[class*="cell"], td, [class*="field"]');
-          return {
-            name: cells[0]?.textContent?.trim() || undefined,
-            date: cells[1]?.textContent?.trim() || undefined,
-            type: cells[2]?.textContent?.trim() || undefined,
-          };
-        });
-      }
-      return [];
-    });
-  } catch {
-    return [];
-  }
-}
-
-export async function extractFundingRounds(page: Page): Promise<FundingRound[]> {
-  return extractFundingRoundsFromDOM(page);
+  if (maxRounds && maxRounds > 0) return rounds.slice(0, maxRounds);
+  return rounds;
 }

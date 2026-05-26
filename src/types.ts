@@ -1,5 +1,5 @@
 export interface Input {
-  mode: 'search' | 'urls' | 'hybrid';
+  mode: 'search' | 'urls';
 
   startUrls?: { url: string }[];
   searchQueries?: string[];
@@ -20,6 +20,9 @@ export interface Input {
   extractSimilarCompanies?: boolean;
   extractInvestors?: boolean;
   extractContacts?: boolean;
+
+  capsolverApiKey?: string;
+  capsolverProxy?: string;
   crunchbaseApiKey?: string;
 
   proxyConfiguration?: {
@@ -28,7 +31,6 @@ export interface Input {
   };
   concurrency?: number;
   maxRetries?: number;
-  screenshot?: boolean;
   webhookUrl?: string;
   outputFormat?: 'json' | 'csv';
 }
@@ -98,6 +100,7 @@ export interface CrunchbaseCompany {
 
   scrapedAt: string;
   error?: string;
+  source?: 'official_api' | 'session_api' | 'nextdata';
 }
 
 export interface Address {
@@ -164,6 +167,7 @@ export interface SocialLinks {
 export interface SearchResult {
   name: string;
   url: string;
+  uuid?: string;
   shortDescription?: string;
   location?: string;
   employeeRange?: string;

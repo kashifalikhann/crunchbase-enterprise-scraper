@@ -1,4 +1,3 @@
-import { Page } from 'playwright';
 import { TIMING, USER_AGENTS } from './constants.js';
 import { SocialLinks } from './types.js';
 
@@ -11,62 +10,6 @@ export async function randomDelay(min = TIMING.minDelay, max = TIMING.maxDelay):
   await new Promise(r => setTimeout(r, ms));
 }
 
-export async function scrollPage(page: Page): Promise<void> {
-  await page.evaluate(async () => {
-    const scrollHeight = document.body.scrollHeight;
-    const viewportHeight = window.innerHeight;
-    const steps = Math.min(Math.ceil(scrollHeight / viewportHeight), 20);
-    for (let i = 0; i < steps; i++) {
-      window.scrollTo(0, Math.min(viewportHeight * (i + 1), scrollHeight));
-      await new Promise(r => setTimeout(r, 300));
-    }
-  });
-}
-
-export async function extractText(page: Page, selector: string): Promise<string | undefined> {
-  try {
-    const el = await page.$(selector);
-    if (!el) return undefined;
-    return ((await el.textContent()) || '').trim() || undefined;
-  } catch { return undefined; }
-}
-
-export function extractCurrencyAmountFromDOM(text: string | null | undefined): { amount?: number; currency?: string } {
-  if (!text) return {};
-  let cleaned = text.replace(/[$€£¥₹]/g, '').trim();
-  const multipliers: [RegExp, number][] = [
-    [/([0-9.]+)\s*B/i, 1_000_000_000],
-    [/([0-9.]+)\s*M/i, 1_000_000],
-    [/([0-9.]+)\s*K/i, 1_000],
-  ];
-  for (const [pattern, mult] of multipliers) {
-    const m = cleaned.match(pattern);
-    if (m) return { amount: parseFloat(m[1]) * mult };
-  }
-  const num = parseFloat(cleaned.replace(/[^0-9.]/g, ''));
-  return { amount: isNaN(num) ? undefined : num };
-}
-
-export async function extractDOMSocialLinks(page: Page): Promise<SocialLinks | undefined> {
-  try {
-    return await page.evaluate(() => {
-      const links = document.querySelectorAll('a');
-      const result: Record<string, string> = {};
-      links.forEach(link => {
-        const href = link.href || '';
-        if (href.includes('linkedin.com/company')) result.linkedin = href;
-        if (href.includes('twitter.com') || href.includes('x.com')) result.twitter = href;
-        if (href.includes('facebook.com')) result.facebook = href;
-        if (href.includes('youtube.com')) result.youtube = href;
-        if (href.includes('instagram.com')) result.instagram = href;
-        if (href.includes('github.com')) result.github = href;
-        if (href.includes('tiktok.com')) result.tiktok = href;
-      });
-      return Object.keys(result).length ? result as SocialLinks : undefined;
-    });
-  } catch { return undefined; }
-}
-
 export function parseCrunchbaseUrl(urlOrName: string): string {
   if (urlOrName.startsWith('http')) {
     const match = urlOrName.match(/crunchbase\.com\/(?:organization|company|person)\/([^/?]+)/);
@@ -75,16 +18,87 @@ export function parseCrunchbaseUrl(urlOrName: string): string {
   return `https://www.crunchbase.com/organization/${urlOrName}`;
 }
 
-export async function waitForStablePage(page: Page): Promise<void> {
-  try {
-    await page.waitForLoadState('networkidle', { timeout: 15000 });
-  } catch {}
-  await randomDelay(1000, 2000);
-}
-
 export function parseNumber(val: string | number | undefined | null): number | undefined {
   if (val === undefined || val === null) return undefined;
   if (typeof val === 'number') return val;
   const n = parseFloat(val.replace(/[^0-9.-]/g, ''));
   return isNaN(n) ? undefined : n;
+}
+
+export function getSlugFromUrl(url: string): string {
+  const match = url.match(/crunchbase\.com\/(?:organization|company|person)\/([^/?]+)/);
+  return match ? match[1] : url.split('/').pop() || '';
+}
+
+export function buildCookieHeader(cookies: Record<string, string>): string {
+  return Object.entries(cookies)
+    .map(([k, v]) => `${k}=${v}`)
+    .join('; ');
+}
+
+export function parseCookiesFromString(cookieStr: string): Record<string, string> {
+  const cookies: Record<string, string> = {};
+  cookieStr.split(';').forEach(pair => {
+    const [k, ...v] = pair.trim().split('=');
+    if (k) cookies[k.trim()] = v.join('=');
+  });
+  return cookies;
+}
+
+export function extractCookiesFromResponse(resp: Response): Record<string, string> {
+  const cookies: Record<string, string> = {};
+  const setCookieHeaders = resp.headers.getSetCookie?.() || [];
+  if (setCookieHeaders.length === 0) {
+    const single = resp.headers.get('set-cookie');
+    if (single) setCookieHeaders.push(single);
+  }
+  for (const h of setCookieHeaders) {
+    Object.assign(cookies, parseCookiesFromString(h.split(';')[0]));
+  }
+  return cookies;
+}
+
+export function httpFetch(url: string, options: RequestInit = {}, timeout = TIMING.requestTimeout): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
+  return fetch(url, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
+}
+
+export function extractCurrencyAmount(text: string | undefined | null): { amount?: number; currency?: string } {
+  if (!text) return {};
+  const multipliers: [RegExp, number][] = [
+    [/([0-9.]+)\s*B/i, 1_000_000_000],
+    [/([0-9.]+)\s*M/i, 1_000_000],
+    [/([0-9.]+)\s*K/i, 1_000],
+  ];
+  for (const [pattern, mult] of multipliers) {
+    const m = text.match(pattern);
+    if (m) return { amount: parseFloat(m[1]) * mult };
+  }
+  const num = parseFloat(text.replace(/[^0-9.]/g, ''));
+  return { amount: isNaN(num) ? undefined : num };
+}
+
+export function buildSocialLinks(props: any): SocialLinks | undefined {
+  const links: SocialLinks = {};
+  let hasAny = false;
+  for (const [key, field] of Object.entries({
+    linkedin: 'linkedin_url', twitter: 'twitter_url', facebook: 'facebook_url',
+    youtube: 'youtube_url', instagram: 'instagram_url', github: 'github_url', tiktok: 'tiktok_url',
+  } as Record<string, string>)) {
+    const val = props[field];
+    if (val) { (links as any)[key] = val; hasAny = true; }
+  }
+  return hasAny ? links : undefined;
+}
+
+export function parseApiEntityProperties(entity: any): Record<string, any> {
+  const props: Record<string, any> = {};
+  if (!entity?.properties) return props;
+  for (const p of entity.properties) {
+    if (p.value !== null && p.value !== undefined) {
+      props[p.property_id] = p.value;
+    }
+  }
+  return props;
 }

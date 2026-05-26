@@ -1,8 +1,9 @@
 import { Actor, log } from 'apify';
-import { chromium, Browser, Page } from 'playwright';
 import { Input, CrunchbaseCompany } from './types.js';
 import { handleCompanyUrl, handleSearch } from './routes.js';
-import { TIMING, MAX_RETRIES, DEFAULT_CONCURRENCY } from './constants.js';
+import { CrunchbaseClient, ClientAuth } from './crunchbase-client.js';
+import { solveCloudflare } from './capsolver.js';
+import { TIMING, MAX_RETRIES, DEFAULT_CONCURRENCY, CRUNCHBASE_URL } from './constants.js';
 import { randomDelay, getRandomUserAgent } from './utils.js';
 
 interface RunStats {
@@ -27,8 +28,13 @@ Actor.main(async () => {
   log.info('Crunchbase Enterprise Scraper starting', {
     mode: input.mode,
     maxCompanies: input.maxCompanies || 'unlimited',
-    concurrency: input.concurrency || DEFAULT_CONCURRENCY,
+    hasApiKey: !!input.crunchbaseApiKey,
+    hasCapsolverKey: !!input.capsolverApiKey,
   });
+
+  if (!input.crunchbaseApiKey && !input.capsolverApiKey) {
+    log.warning('No authentication provided. Provide crunchbaseApiKey or capsolverApiKey for data access.');
+  }
 
   const stats: RunStats = {
     totalUrls: 0,
@@ -40,10 +46,8 @@ Actor.main(async () => {
     peopleCount: 0,
   };
 
-  const concurrency = Math.min(input.concurrency || DEFAULT_CONCURRENCY, 10);
   const maxRetries = input.maxRetries || MAX_RETRIES;
   const webhookUrl = input?.webhookUrl;
-  const proxyConfig = input.proxyConfiguration || { useApifyProxy: true };
 
   const processedUrls = new Set<string>();
   const checkpoint = await Actor.getValue<{ processedUrls: string[] }>(CHECKPOINT_KEY).catch(() => null);
@@ -52,51 +56,48 @@ Actor.main(async () => {
     log.info(`Resuming from checkpoint: ${processedUrls.size} already processed`);
   }
 
-  let browser: Browser | null = null;
-
   try {
-    const proxyOptions: Record<string, any> = {};
-    if (proxyConfig.useApifyProxy) {
-      proxyOptions.apifyProxyGroups = proxyConfig.apifyProxyGroups || ['RESIDENTIAL'];
+    let auth: ClientAuth;
+    let userAgent = getRandomUserAgent();
+
+    if (input.capsolverApiKey) {
+      log.info('Solving Cloudflare challenge via CapSolver...');
+      try {
+        const solution = await solveCloudflare(
+          input.capsolverApiKey,
+          CRUNCHBASE_URL,
+          input.capsolverProxy,
+          userAgent,
+        );
+        userAgent = solution.userAgent || userAgent;
+        log.info(`CapSolver solved Cloudflare. Cookies: ${Object.keys(solution.cookies).join(', ') || 'none'}`);
+        auth = { type: 'session', cookies: solution.cookies };
+      } catch (capsolverError) {
+        log.error('CapSolver failed', { error: String(capsolverError) });
+        if (input.crunchbaseApiKey) {
+          log.info('Falling back to official API key');
+          auth = { type: 'api_key', key: input.crunchbaseApiKey };
+        } else {
+          throw new Error(`CapSolver failed and no API key fallback: ${capsolverError}`);
+        }
+      }
+    } else if (input.crunchbaseApiKey) {
+      auth = { type: 'api_key', key: input.crunchbaseApiKey };
+    } else {
+      log.warning('No auth configured — attempting direct fetch (likely blocked by Cloudflare)');
+      auth = { type: 'none' };
     }
 
-    browser = await chromium.launch({
-      headless: true,
-      args: [
-        '--disable-blink-features=AutomationControlled',
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
-        '--disable-web-security',
-        '--disable-features=IsolateOrigins,site-per-process',
-      ],
-    });
+    const client = new CrunchbaseClient(auth, userAgent);
 
-    const context = await browser.newContext({
-      userAgent: getRandomUserAgent(),
-      viewport: { width: 1920, height: 1080 },
-      locale: 'en-US',
-      timezoneId: 'America/New_York',
-      extraHTTPHeaders: { 'Accept-Language': 'en-US,en;q=0.9' },
-    });
-
-    await context.addInitScript(() => {
-      Object.defineProperty(navigator, 'webdriver', { get: () => false });
-      Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] as any });
-      Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-      (window as Record<string, any>).chrome = { runtime: {} };
-    });
-
-    const page = await context.newPage();
-    await page.setDefaultTimeout(TIMING.navigationTimeout);
-
-    if (input.mode === 'search' || input.mode === 'hybrid') {
+    if (input.mode === 'search') {
       log.info(`Search mode: ${input.searchQueries?.join(', ') || 'all'}`, {
         location: input.location,
         industry: input.industry,
         fundingStage: input.fundingStage,
       });
-      const { companies, searchResults } = await handleSearch(page, input);
+
+      const { companies, searchResults } = await handleSearch(client, input);
       stats.searchResultsCount = searchResults.length;
 
       for (const company of companies) {
@@ -109,7 +110,7 @@ Actor.main(async () => {
       stats.failed = companies.filter(c => c.error).length;
     }
 
-    if (input.mode === 'urls' || input.mode === 'hybrid') {
+    if (input.mode === 'urls') {
       const rawUrls = (input.startUrls || []).map(u => u.url).filter(Boolean);
       stats.totalUrls = rawUrls.length;
       log.info(`URL mode: ${rawUrls.length} URLs (${processedUrls.size} already processed)`);
@@ -118,7 +119,7 @@ Actor.main(async () => {
         const url = rawUrls[i];
         if (processedUrls.has(url)) continue;
 
-        await processUrlWithRetry(page, url, input, stats, maxRetries);
+        await processUrlWithRetry(client, url, input, stats, maxRetries);
         processedUrls.add(url);
 
         if (processedUrls.size % 10 === 0) {
@@ -140,19 +141,20 @@ Actor.main(async () => {
 
   } catch (error) {
     log.error('Fatal error', { error: String(error) });
-    if (processedUrls.size > 0) await saveCheckpoint([...processedUrls]);
     throw error;
-  } finally {
-    if (browser) { await browser.close(); }
   }
 });
 
 async function processUrlWithRetry(
-  page: Page, url: string, input: Input, stats: RunStats, maxRetries: number
+  client: CrunchbaseClient,
+  url: string,
+  input: Input,
+  stats: RunStats,
+  maxRetries: number,
 ): Promise<void> {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
-      const company = await handleCompanyUrl(page, url, input);
+      const company = await handleCompanyUrl(client, url, input);
       await Actor.pushData(company);
 
       if (company.error) {
