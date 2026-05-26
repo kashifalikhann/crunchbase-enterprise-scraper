@@ -167,6 +167,19 @@ export class CrunchbaseClient {
   }
 
   private async searchViaBrowser(filters: CompanySearchFilters, maxResults: number): Promise<SearchResult[]> {
+    let results: SearchResult[] = [];
+
+    results = await this.searchCrunchbaseDiscover(filters);
+    if (results.length > 0) return results.slice(0, maxResults);
+
+    log.info('Crunchbase discover blocked, falling back to Google search');
+    results = await this.searchViaGoogle(filters.query || '');
+    if (results.length > 0) return results.slice(0, maxResults);
+
+    return [];
+  }
+
+  private async searchCrunchbaseDiscover(filters: CompanySearchFilters): Promise<SearchResult[]> {
     try {
       const params = new URLSearchParams();
       if (filters.query) params.set('q', filters.query);
@@ -185,7 +198,42 @@ export class CrunchbaseClient {
       const nextData = extractNextDataFromHtml(html);
       if (!nextData) return [];
 
-      return this.extractSearchResultsFromNextData(nextData).slice(0, maxResults);
+      return this.extractSearchResultsFromNextData(nextData);
+    } catch {
+      return [];
+    }
+  }
+
+  private async searchViaGoogle(query: string): Promise<SearchResult[]> {
+    if (!query) return [];
+    try {
+      const searchUrl = `https://www.google.com/search?q=site:crunchbase.com/organization+${encodeURIComponent(query)}`;
+      const result = await tryBrowserRetrieve(searchUrl);
+      if (!result) return [];
+
+      const { html } = result;
+      const results: SearchResult[] = [];
+
+      const urlRegex = /https:\/\/www\.crunchbase\.com\/organization\/[a-zA-Z0-9_-]+(?:"|'|<|\s|&)/g;
+      const seen = new Set<string>();
+      let match: RegExpExecArray | null;
+
+      while ((match = urlRegex.exec(html)) !== null) {
+        const full = match[0];
+        const url = full.replace(/["'<>&\s].*$/, '');
+        if (seen.has(url)) continue;
+        seen.add(url);
+
+        const slug = getSlugFromUrl(url);
+        const nameMatch = html.substr(Math.max(0, match.index - 200), 400);
+        let name = slug;
+        const titleMatch = nameMatch.match(/<h3[^>]*>([^<]+)<\/h3>/);
+        if (titleMatch) name = titleMatch[1].replace(/<[^>]+>/g, '').trim();
+
+        results.push({ name, url, shortDescription: undefined });
+      }
+
+      return results;
     } catch {
       return [];
     }

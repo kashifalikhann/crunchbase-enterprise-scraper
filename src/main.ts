@@ -58,9 +58,18 @@ Actor.main(async () => {
       : { type: 'none' };
 
     if (auth.type === 'none') {
-      const proxyUrl = input.proxyConfiguration?.useApifyProxy !== false
-        ? undefined
-        : undefined;
+      let proxyUrl: string | undefined;
+      try {
+        if (input.proxyConfiguration?.useApifyProxy !== false) {
+          const proxy = await Actor.createProxyConfiguration();
+          if (proxy) {
+            const url = await proxy.newUrl();
+            if (url) proxyUrl = url;
+          }
+        }
+      } catch {
+        log.info('Proxy not available, proceeding without');
+      }
       await launchBrowser(proxyUrl);
     }
 
