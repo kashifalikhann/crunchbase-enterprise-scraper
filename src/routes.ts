@@ -59,7 +59,7 @@ export async function handleSearch(
     fundingTotalMax: input.fundingTotalMax,
   };
 
-  const results = await searchCompanies(page, filters, maxResults);
+  const results = await searchCompanies(page, filters, maxResults, input.crunchbaseApiKey);
   for (const r of results) {
     if (!allSearchResults.some(ex => ex.url === r.url)) allSearchResults.push(r);
   }

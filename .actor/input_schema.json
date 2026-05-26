@@ -98,6 +98,13 @@
       "description": "Extract similar/competitor companies",
       "default": true
     },
+    "crunchbaseApiKey": {
+      "title": "Crunchbase API Key",
+      "type": "string",
+      "description": "Optional Crunchbase API v4 key for authorized search. Get from https://www.crunchbase.com/settings/api. When set, search uses the official API instead of browser scraping.",
+      "editor": "textfield",
+      "isSecret": true
+    },
     "extractContacts": {
       "title": "Extract Contact Info",
       "type": "boolean",

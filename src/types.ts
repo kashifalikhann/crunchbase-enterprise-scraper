@@ -20,6 +20,7 @@ export interface Input {
   extractSimilarCompanies?: boolean;
   extractInvestors?: boolean;
   extractContacts?: boolean;
+  crunchbaseApiKey?: string;
 
   proxyConfiguration?: {
     useApifyProxy?: boolean;
