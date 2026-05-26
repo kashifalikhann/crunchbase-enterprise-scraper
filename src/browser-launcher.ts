@@ -52,11 +52,14 @@ export async function tryBrowserRetrieve(
   url: string,
   retries = 3,
   proxyUrl?: string,
+  pageTimeout?: number,
 ): Promise<{ html: string; cookies: Record<string, string> } | null> {
   if (!browser || !context) {
     await launchBrowser(proxyUrl);
     if (!browser || !context) return null;
   }
+
+  const navTimeout = pageTimeout ?? 45000;
 
   for (let attempt = 1; attempt <= retries; attempt++) {
     let page: Page | null = null;
@@ -64,7 +67,7 @@ export async function tryBrowserRetrieve(
       page = await context.newPage();
 
       page.setDefaultTimeout(30000);
-      page.setDefaultNavigationTimeout(45000);
+      page.setDefaultNavigationTimeout(navTimeout);
 
       await page.route('**/*', (route: import('playwright').Route) => {
         const reqUrl = route.request().url();

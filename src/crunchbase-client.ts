@@ -189,7 +189,7 @@ export class CrunchbaseClient {
       params.set('layout', 'table');
 
       const url = `${CRUNCHBASE_URL}/discover/organization?${params.toString()}`;
-      const result = await tryBrowserRetrieve(url);
+      const result = await tryBrowserRetrieve(url, 1, undefined, 15000);
       if (!result) return [];
 
       const { html } = result;
@@ -221,6 +221,8 @@ export class CrunchbaseClient {
       }
 
       const html = await resp.text();
+      log.info(`Google search returned ${html.length} bytes`);
+
       const results: SearchResult[] = [];
       const seen = new Set<string>();
       const urlRegex = /https:\/\/www\.crunchbase\.com\/organization\/[a-zA-Z0-9_-]+/g;
@@ -235,6 +237,7 @@ export class CrunchbaseClient {
         results.push({ name: slug, url, shortDescription: undefined });
       }
 
+      log.info(`Google search found ${results.length} Crunchbase URLs`);
       return results;
     } catch (err) {
       log.warning(`Google search failed: ${err instanceof Error ? err.message : String(err)}`);
