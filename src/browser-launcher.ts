@@ -53,6 +53,7 @@ export async function tryBrowserRetrieve(
   retries = 3,
   proxyUrl?: string,
   pageTimeout?: number,
+  requireNextData = true,
 ): Promise<{ html: string; cookies: Record<string, string> } | null> {
   if (!browser || !context) {
     await launchBrowser(proxyUrl);
@@ -110,19 +111,23 @@ export async function tryBrowserRetrieve(
         continue;
       }
 
-      await page.waitForFunction(
-        () => document.querySelector('script#__NEXT_DATA__') !== null,
-        { timeout: 15000 },
-      ).catch(() => {
-        log.warning(`Attempt ${attempt}: __NEXT_DATA__ not found within timeout`);
-      });
+      if (requireNextData) {
+        await page.waitForFunction(
+          () => document.querySelector('script#__NEXT_DATA__') !== null,
+          { timeout: 15000 },
+        ).catch(() => {
+          log.warning(`Attempt ${attempt}: __NEXT_DATA__ not found within timeout`);
+        });
+      } else {
+        await page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+      }
 
       const html = await page.content();
       const cookies = await page.context().cookies();
       const cookieMap: Record<string, string> = {};
       for (const c of cookies) cookieMap[c.name] = c.value;
 
-      if (!html.includes('__NEXT_DATA__')) {
+      if (requireNextData && !html.includes('__NEXT_DATA__')) {
         log.warning(`Attempt ${attempt}: no __NEXT_DATA__ in HTML (length ${html.length})`);
         await page.close();
         page = null;

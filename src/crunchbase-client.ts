@@ -208,7 +208,7 @@ export class CrunchbaseClient {
     if (!query) return [];
     try {
       const searchUrl = `https://www.google.com/search?q=site:crunchbase.com/organization+${encodeURIComponent(query)}`;
-      const result = await tryBrowserRetrieve(searchUrl, 2, undefined, 30000);
+      const result = await tryBrowserRetrieve(searchUrl, 2, undefined, 30000, false);
       if (!result) {
         log.warning('Google search via browser returned no result');
         return [];
