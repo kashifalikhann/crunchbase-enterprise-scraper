@@ -1,0 +1,144 @@
+{
+  "title": "Crunchbase Enterprise Scraper Input",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "mode": {
+      "title": "Scraping Mode",
+      "type": "string",
+      "description": "urls: scrape specific URLs. search: find companies by filters. hybrid: search + auto-scrape each result.",
+      "default": "hybrid",
+      "enum": ["urls", "search", "hybrid"],
+      "enumTitles": ["URLs only", "Search only", "Search + Scrape"]
+    },
+    "startUrls": {
+      "title": "Company URLs",
+      "type": "array",
+      "description": "Crunchbase company URLs to scrape (for urls/hybrid mode). Supports organization, company, or person URLs.",
+      "editor": "requestListSources"
+    },
+    "searchQueries": {
+      "title": "Search Keywords",
+      "type": "array",
+      "description": "Search Crunchbase by keyword (for search/hybrid mode). Combine with filters below.",
+      "editor": "stringList",
+      "prefill": ["AI startup", "fintech SaaS"]
+    },
+    "location": {
+      "title": "Location Filter",
+      "type": "string",
+      "description": "Filter by headquarters location (e.g. 'San Francisco, California', 'United States', 'London, United Kingdom')",
+      "editor": "textfield"
+    },
+    "industry": {
+      "title": "Industry Filter",
+      "type": "string",
+      "description": "Filter by industry category slug (e.g. 'artificial-intelligence', 'fintech', 'saas', 'biotechnology')",
+      "editor": "textfield"
+    },
+    "fundingStage": {
+      "title": "Funding Stage Filter",
+      "type": "string",
+      "description": "Filter by last funding stage",
+      "enum": ["", "seed", "series_a", "series_b", "series_c", "series_d", "series_e", "series_f", "venture", "private_equity", "debt_financing", "grant", "ipo"],
+      "enumTitles": ["Any", "Seed", "Series A", "Series B", "Series C", "Series D", "Series E", "Series F", "Venture", "Private Equity", "Debt Financing", "Grant", "IPO"],
+      "default": ""
+    },
+    "employeeCount": {
+      "title": "Employee Count Range",
+      "type": "string",
+      "description": "Filter by employee count range",
+      "enum": ["", "1-10", "11-50", "51-100", "101-250", "251-500", "501-1000", "1001-5000", "5001-10000", "10000+"],
+      "enumTitles": ["Any", "1-10", "11-50", "51-100", "101-250", "251-500", "501-1000", "1001-5000", "5001-10000", "10000+"],
+      "default": ""
+    },
+    "maxCompanies": {
+      "title": "Max Companies",
+      "type": "integer",
+      "description": "Maximum number of companies to scrape (max 500)",
+      "default": 50,
+      "minimum": 1,
+      "maximum": 500
+    },
+    "maxFundingRounds": {
+      "title": "Max Funding Rounds per Company",
+      "type": "integer",
+      "description": "Maximum funding rounds to extract per company",
+      "default": 10,
+      "minimum": 0,
+      "maximum": 50
+    },
+    "extractPeople": {
+      "title": "Extract People",
+      "type": "boolean",
+      "description": "Extract founders, executives, board members, and team",
+      "default": true
+    },
+    "extractFunding": {
+      "title": "Extract Funding Rounds",
+      "type": "boolean",
+      "description": "Extract funding round details (amount, type, date, investors, valuation)",
+      "default": true
+    },
+    "extractInvestors": {
+      "title": "Extract Investors",
+      "type": "boolean",
+      "description": "Extract investor list with names and types",
+      "default": true
+    },
+    "extractTechStack": {
+      "title": "Extract Tech Stack",
+      "type": "boolean",
+      "description": "Extract technology stack categories",
+      "default": true
+    },
+    "extractSimilarCompanies": {
+      "title": "Extract Similar Companies",
+      "type": "boolean",
+      "description": "Extract similar/competitor companies",
+      "default": true
+    },
+    "extractContacts": {
+      "title": "Extract Contact Info",
+      "type": "boolean",
+      "description": "Extract contact email and phone number when available",
+      "default": true
+    },
+    "concurrency": {
+      "title": "Concurrency",
+      "type": "integer",
+      "description": "Browser concurrency level (1-10)",
+      "default": 3,
+      "minimum": 1,
+      "maximum": 10
+    },
+    "maxRetries": {
+      "title": "Max Retries per URL",
+      "type": "integer",
+      "description": "Number of retry attempts on failure",
+      "default": 3,
+      "minimum": 0,
+      "maximum": 10
+    },
+    "proxyConfiguration": {
+      "title": "Proxy Configuration",
+      "type": "object",
+      "description": "Residential proxies strongly recommended for Crunchbase (datacenter IPs get blocked)",
+      "editor": "proxy",
+      "default": { "useApifyProxy": true, "apifyProxyGroups": ["RESIDENTIAL"] }
+    },
+    "screenshot": {
+      "title": "Capture Screenshots",
+      "type": "boolean",
+      "description": "Capture a screenshot of each company page (stored in key-value store)",
+      "default": false
+    },
+    "webhookUrl": {
+      "title": "Webhook URL",
+      "type": "string",
+      "description": "POST URL for progress notifications. Receives JSON with stats every 10 companies.",
+      "editor": "textfield"
+    }
+  },
+  "required": []
+}

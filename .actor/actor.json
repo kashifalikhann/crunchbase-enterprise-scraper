@@ -1,0 +1,17 @@
+{
+  "actorSpecification": 1,
+  "name": "crunchbase-company-scraper",
+  "title": "Crunchbase Company Scraper - Enterprise Grade",
+  "description": "Enterprise-grade Crunchbase scraper with Playwright. Extract company profiles, funding rounds, investors, leadership teams, tech stack, and similar companies. Supports search by keyword, URL batch processing, and hybrid mode. 50+ data fields per company. Built-in retry, proxy rotation, webhooks, and checkpoint resume.",
+  "version": "1.0.0",
+  "meta": {
+    "templateId": "ts-crawlee-playwright",
+    "generatedBy": "Claude Code with big-pickle"
+  },
+  "input": "./input_schema.json",
+  "output": "./output_schema.json",
+  "storages": {
+    "dataset": "./dataset_schema.json"
+  },
+  "dockerfile": "../Dockerfile"
+}

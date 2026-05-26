@@ -1,0 +1,23 @@
+{
+  "actorSpecification": 1,
+  "fields": {
+    "url": { "title": "URL", "type": "string" },
+    "name": { "title": "Name", "type": "string" },
+    "legalName": { "title": "Legal Name", "type": "string" },
+    "shortDescription": { "title": "Short Description", "type": "string" },
+    "website": { "title": "Website", "type": "string" },
+    "crunchbaseRank": { "title": "CB Rank", "type": "integer" },
+    "employeeCount": { "title": "Employees", "type": "integer" },
+    "totalFundingAmount": { "title": "Total Funding", "type": "number" },
+    "numFundingRounds": { "title": "Funding Rounds", "type": "integer" },
+    "operatingStatus": { "title": "Status", "type": "string" },
+    "revenueRange": { "title": "Revenue Range", "type": "string" },
+    "contactEmail": { "title": "Contact Email", "type": "string" },
+    "phoneNumber": { "title": "Phone", "type": "string" },
+    "growthScore": { "title": "Growth Score", "type": "number" },
+    "trafficRank": { "title": "Traffic Rank", "type": "number" },
+    "patentsGranted": { "title": "Patents", "type": "integer" },
+    "mostRecentValuation": { "title": "Latest Valuation", "type": "number" },
+    "scrapedAt": { "title": "Scraped At", "type": "string" }
+  }
+}

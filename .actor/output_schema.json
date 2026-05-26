@@ -1,0 +1,19 @@
+{
+  "actorOutputSchemaVersion": 1,
+  "title": "Crunchbase Scraping Results",
+  "description": "Complete company data extracted from Crunchbase including financials, people, and technology",
+  "properties": {
+    "dataset": {
+      "type": "string",
+      "title": "Results",
+      "description": "Dataset containing all scraped company data",
+      "template": "{{links.apiDefaultDatasetUrl}}/items"
+    },
+    "stats": {
+      "type": "string",
+      "title": "Run Statistics",
+      "description": "Scraping statistics including completion rate and duration",
+      "template": "{{links.apiDefaultKeyValueStoreUrl}}/records/STATS"
+    }
+  }
+}
