@@ -58,19 +58,7 @@ Actor.main(async () => {
       : { type: 'none' };
 
     if (auth.type === 'none') {
-      let proxyUrl: string | undefined;
-      try {
-        if (input.proxyConfiguration?.useApifyProxy !== false) {
-          const proxy = await Actor.createProxyConfiguration();
-          if (proxy) {
-            const url = await proxy.newUrl();
-            if (url) proxyUrl = url;
-          }
-        }
-      } catch {
-        log.info('Proxy not available, proceeding without');
-      }
-      await launchBrowser(proxyUrl);
+      await launchBrowser();
     }
 
     const client = new CrunchbaseClient(auth, getRandomUserAgent());
