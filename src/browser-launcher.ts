@@ -66,7 +66,7 @@ export async function tryBrowserRetrieve(
       page.setDefaultTimeout(30000);
       page.setDefaultNavigationTimeout(45000);
 
-      await page.route('**/*', (route) => {
+      await page.route('**/*', (route: import('playwright').Route) => {
         const reqUrl = route.request().url();
         const blockPatterns = [
           'cdn-cgi',
