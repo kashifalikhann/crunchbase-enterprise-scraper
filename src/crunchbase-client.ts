@@ -3,7 +3,7 @@ import { CRUNCHBASE_URL, CRUNCHBASE_API_URL, API_FIELD_IDS, TIMING } from './con
 import { SearchResult, CompanySearchFilters, CrunchbaseCompany, Person } from './types.js';
 import { getRandomUserAgent, httpFetch, getSlugFromUrl, buildCookieHeader, extractCookiesFromResponse, parseApiEntityProperties, buildSocialLinks } from './utils.js';
 import { extractNextDataFromHtml, parseNextDataCompanyProps, parseNextDataFundingRounds, parseNextDataPeople, parseNextDataInvestors, parseNextDataSimilarCompanies, parseNextDataTechStack, RawCompanyProperties } from './nextdata.js';
-import { tryBrowserRetrieve } from './browser-launcher.js';
+import { tryBrowserRetrieve, fetchCrunchbaseViaProxy } from './browser-launcher.js';
 
 export type ClientAuth =
   | { type: 'api_key'; key: string }
@@ -72,20 +72,17 @@ export class CrunchbaseClient {
   private async getCompanyViaBrowser(slug: string): Promise<{ company: CrunchbaseCompany; nextData?: any } | null> {
     try {
       const url = `${CRUNCHBASE_URL}/organization/${slug}`;
-      const result = await tryBrowserRetrieve(url);
-      if (!result) return null;
-
-      const { html, cookies } = result;
-      Object.assign(this.baseCookies, cookies);
+      const html = await fetchCrunchbaseViaProxy(url);
+      if (!html) return null;
 
       const parsed = this.parseCompanyFromHtml(html, url, 'browser');
       if (!parsed) {
-        log.warning(`Browser got page but no __NEXT_DATA__ for ${slug}`);
+        log.warning(`Proxy fetch got page but no __NEXT_DATA__ for ${slug}`);
         return null;
       }
       return parsed;
     } catch (err) {
-      log.warning(`Browser extraction failed for ${slug}: ${err instanceof Error ? err.message : String(err)}`);
+      log.warning(`Proxy fetch failed for ${slug}: ${err instanceof Error ? err.message : String(err)}`);
       return null;
     }
   }
@@ -189,10 +186,9 @@ export class CrunchbaseClient {
       params.set('layout', 'table');
 
       const url = `${CRUNCHBASE_URL}/discover/organization?${params.toString()}`;
-      const result = await tryBrowserRetrieve(url, 1, undefined, 15000);
-      if (!result) return [];
+      const html = await fetchCrunchbaseViaProxy(url);
+      if (!html) return [];
 
-      const { html } = result;
       if (html.includes('Just a moment') || html.includes('Checking your browser')) return [];
 
       const nextData = extractNextDataFromHtml(html);

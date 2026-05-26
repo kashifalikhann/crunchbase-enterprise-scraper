@@ -3,10 +3,16 @@ import { chromium, Browser, BrowserContext, Page } from 'playwright';
 
 let browser: Browser | null = null;
 let context: BrowserContext | null = null;
+let proxyContext: BrowserContext | null = null;
 
-export async function launchBrowser(proxyUrl?: string): Promise<void> {
+export async function getOrLaunchBrowser(): Promise<Browser> {
+  if (!browser) await launchBrowser();
+  return browser!;
+}
+
+export async function launchBrowser(_proxyUrl?: string): Promise<void> {
   if (browser) return;
-  log.info('Launching Playwright browser', { proxyConfigured: !!proxyUrl });
+  log.info('Launching Playwright browser');
 
   const launchOptions: Parameters<typeof chromium.launch>[0] = {
     headless: true,
@@ -33,7 +39,6 @@ export async function launchBrowser(proxyUrl?: string): Promise<void> {
     viewport,
     locale: 'en-US',
     timezoneId: 'America/New_York',
-    proxy: proxyUrl ? { server: proxyUrl } : undefined,
     bypassCSP: true,
     ignoreHTTPSErrors: true,
     extraHTTPHeaders: {
@@ -51,12 +56,12 @@ export async function launchBrowser(proxyUrl?: string): Promise<void> {
 export async function tryBrowserRetrieve(
   url: string,
   retries = 3,
-  proxyUrl?: string,
+  _proxyUrl?: string,
   pageTimeout?: number,
   requireNextData = true,
 ): Promise<{ html: string; cookies: Record<string, string> } | null> {
   if (!browser || !context) {
-    await launchBrowser(proxyUrl);
+    await launchBrowser();
     if (!browser || !context) return null;
   }
 
@@ -155,7 +160,58 @@ export async function tryBrowserRetrieve(
   return null;
 }
 
+export async function fetchCrunchbaseViaProxy(url: string): Promise<string | null> {
+  try {
+    if (!proxyContext) {
+      const b = await getOrLaunchBrowser();
+      const proxyConfig = await Actor.createProxyConfiguration({ groups: ['RESIDENTIAL'] });
+      if (!proxyConfig) {
+        log.warning('Apify proxy configuration not available');
+        return null;
+      }
+      const pUrl = await proxyConfig.newUrl();
+      if (!pUrl) {
+        log.warning('Apify proxy URL not available');
+        return null;
+      }
+      proxyContext = await b.newContext({
+        proxy: { server: pUrl },
+        userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+        locale: 'en-US',
+        extraHTTPHeaders: {
+          'Accept-Language': 'en-US,en;q=0.9',
+        },
+        ignoreHTTPSErrors: true,
+      });
+    }
+
+    const resp = await proxyContext.request.get(url, { timeout: 30000 });
+    if (!resp.ok()) {
+      log.warning(`Proxy fetch returned ${resp.status()} for ${url.substring(0, 80)}`);
+      const body = await resp.body();
+      if (body.length > 0) {
+        const text = body.toString('utf-8');
+        if (text.includes('__NEXT_DATA__')) {
+          log.info(`Proxy fetch got status ${resp.status()} but HTML contains __NEXT_DATA__ — using it`);
+          return text;
+        }
+      }
+      return null;
+    }
+
+    log.info(`Proxy fetch OK: ${url.substring(0, 80)}`);
+    return await resp.text();
+  } catch (err) {
+    log.warning(`Proxy fetch failed: ${err instanceof Error ? err.message : String(err)}`);
+    return null;
+  }
+}
+
 export async function closeBrowser(): Promise<void> {
+  if (proxyContext) {
+    try { await proxyContext.close(); } catch {}
+    proxyContext = null;
+  }
   if (context) {
     try { await context.close(); } catch {}
     context = null;
