@@ -203,3 +203,26 @@ export function parseNextDataSimilarCompanies(nextData: NextDataProps): Array<{ 
     return [];
   }
 }
+
+export function parseNextDataTechStack(nextData: NextDataProps): string[] {
+  try {
+    const cards = nextData?.pageProps?.pageContext?.entity?.cards;
+    if (!cards) return [];
+
+    const techCards = cards?.technology_markets || cards?.technology_products || cards?.categories_rollup;
+    if (Array.isArray(techCards)) {
+      return techCards
+        .map((t: any) => t?.identifier?.value || t?.name || t?.value)
+        .filter(Boolean);
+    }
+
+    const props = nextData?.pageProps?.pageContext?.entity?.properties;
+    if (props?.hub_tags && Array.isArray(props.hub_tags)) {
+      return props.hub_tags;
+    }
+
+    return [];
+  } catch {
+    return [];
+  }
+}

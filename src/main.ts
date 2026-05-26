@@ -1,9 +1,9 @@
 import { Actor, log } from 'apify';
 import { Input, CrunchbaseCompany } from './types.js';
-import { handleCompanyUrl, handleSearch } from './routes.js';
+import { handleCompanyUrl, handleSearch, handleHybrid } from './routes.js';
 import { CrunchbaseClient, ClientAuth } from './crunchbase-client.js';
-import { solveCloudflare } from './capsolver.js';
-import { TIMING, MAX_RETRIES, DEFAULT_CONCURRENCY, CRUNCHBASE_URL } from './constants.js';
+import { launchBrowser, closeBrowser } from './browser-launcher.js';
+import { MAX_RETRIES, CRUNCHBASE_URL } from './constants.js';
 import { randomDelay, getRandomUserAgent } from './utils.js';
 
 interface RunStats {
@@ -29,12 +29,7 @@ Actor.main(async () => {
     mode: input.mode,
     maxCompanies: input.maxCompanies || 'unlimited',
     hasApiKey: !!input.crunchbaseApiKey,
-    hasCapsolverKey: !!input.capsolverApiKey,
   });
-
-  if (!input.crunchbaseApiKey && !input.capsolverApiKey) {
-    log.warning('No authentication provided. Provide crunchbaseApiKey or capsolverApiKey for data access.');
-  }
 
   const stats: RunStats = {
     totalUrls: 0,
@@ -48,6 +43,7 @@ Actor.main(async () => {
 
   const maxRetries = input.maxRetries || MAX_RETRIES;
   const webhookUrl = input?.webhookUrl;
+  const allCompanies: CrunchbaseCompany[] = [];
 
   const processedUrls = new Set<string>();
   const checkpoint = await Actor.getValue<{ processedUrls: string[] }>(CHECKPOINT_KEY).catch(() => null);
@@ -57,41 +53,21 @@ Actor.main(async () => {
   }
 
   try {
-    let auth: ClientAuth;
-    let userAgent = getRandomUserAgent();
+    const auth: ClientAuth = input.crunchbaseApiKey
+      ? { type: 'api_key', key: input.crunchbaseApiKey }
+      : { type: 'none' };
 
-    if (input.capsolverApiKey) {
-      log.info('Solving Cloudflare challenge via CapSolver...');
-      try {
-        const solution = await solveCloudflare(
-          input.capsolverApiKey,
-          CRUNCHBASE_URL,
-          input.capsolverProxy,
-          userAgent,
-        );
-        userAgent = solution.userAgent || userAgent;
-        log.info(`CapSolver solved Cloudflare. Cookies: ${Object.keys(solution.cookies).join(', ') || 'none'}`);
-        auth = { type: 'session', cookies: solution.cookies };
-      } catch (capsolverError) {
-        log.error('CapSolver failed', { error: String(capsolverError) });
-        if (input.crunchbaseApiKey) {
-          log.info('Falling back to official API key');
-          auth = { type: 'api_key', key: input.crunchbaseApiKey };
-        } else {
-          throw new Error(`CapSolver failed and no API key fallback: ${capsolverError}`);
-        }
-      }
-    } else if (input.crunchbaseApiKey) {
-      auth = { type: 'api_key', key: input.crunchbaseApiKey };
-    } else {
-      log.warning('No auth configured — attempting direct fetch (likely blocked by Cloudflare)');
-      auth = { type: 'none' };
+    if (auth.type === 'none') {
+      const proxyUrl = input.proxyConfiguration?.useApifyProxy !== false
+        ? undefined
+        : undefined;
+      await launchBrowser(proxyUrl);
     }
 
-    const client = new CrunchbaseClient(auth, userAgent);
+    const client = new CrunchbaseClient(auth, getRandomUserAgent());
 
-    if (input.mode === 'search') {
-      log.info(`Search mode: ${input.searchQueries?.join(', ') || 'all'}`, {
+    if (input.mode === 'search' || input.mode === 'hybrid') {
+      log.info(`${input.mode} mode: ${input.searchQueries?.join(', ') || 'all'}`, {
         location: input.location,
         industry: input.industry,
         fundingStage: input.fundingStage,
@@ -103,15 +79,35 @@ Actor.main(async () => {
       for (const company of companies) {
         if (processedUrls.has(company.url)) continue;
         await Actor.pushData(company);
+        allCompanies.push(company);
         processedUrls.add(company.url);
         updateStats(company, stats);
       }
       stats.completed = companies.filter(c => !c.error).length;
       stats.failed = companies.filter(c => c.error).length;
+
+      if (input.mode === 'hybrid') {
+        const maxCompanies = input.maxCompanies || 50;
+        const extraNeeded = maxCompanies - companies.length;
+        if (extraNeeded > 0 && searchResults.length > companies.length) {
+          log.info(`Hybrid: scraping ${Math.min(extraNeeded, searchResults.length - companies.length)} additional companies from search results`);
+          const extraCompanies = await handleHybrid(
+            client, searchResults.slice(companies.length),
+            input, extraNeeded,
+          );
+          for (const company of extraCompanies) {
+            await Actor.pushData(company);
+            allCompanies.push(company);
+            updateStats(company, stats);
+          }
+          stats.completed = allCompanies.filter(c => !c.error).length;
+          stats.failed = allCompanies.filter(c => c.error).length;
+        }
+      }
     }
 
     if (input.mode === 'urls') {
-      const rawUrls = (input.startUrls || []).map(u => u.url).filter(Boolean);
+      const rawUrls = (input.startUrls || []).map(u => typeof u === 'string' ? u : u.url).filter(Boolean);
       stats.totalUrls = rawUrls.length;
       log.info(`URL mode: ${rawUrls.length} URLs (${processedUrls.size} already processed)`);
 
@@ -119,14 +115,26 @@ Actor.main(async () => {
         const url = rawUrls[i];
         if (processedUrls.has(url)) continue;
 
-        await processUrlWithRetry(client, url, input, stats, maxRetries);
+        const company = await processUrlWithRetry(client, url, input, maxRetries);
+        await Actor.pushData(company);
+        allCompanies.push(company);
         processedUrls.add(url);
+        if (company.error) stats.failed++;
+        else {
+          stats.completed++;
+          if (company.fundingRounds) stats.fundingRoundsCount += company.fundingRounds.length;
+          if (company.people) stats.peopleCount += company.people.length;
+        }
 
         if (processedUrls.size % 10 === 0) {
           await saveCheckpoint([...processedUrls]);
           if (webhookUrl) await sendWebhook(webhookUrl, stats);
         }
       }
+    }
+
+    if (input.outputFormat === 'csv') {
+      await writeCsvOutput(allCompanies);
     }
 
     const duration = ((Date.now() - stats.startTime) / 1000).toFixed(1);
@@ -142,6 +150,8 @@ Actor.main(async () => {
   } catch (error) {
     log.error('Fatal error', { error: String(error) });
     throw error;
+  } finally {
+    await closeBrowser();
   }
 });
 
@@ -149,38 +159,33 @@ async function processUrlWithRetry(
   client: CrunchbaseClient,
   url: string,
   input: Input,
-  stats: RunStats,
   maxRetries: number,
-): Promise<void> {
+): Promise<CrunchbaseCompany> {
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       const company = await handleCompanyUrl(client, url, input);
-      await Actor.pushData(company);
-
       if (company.error) {
-        stats.failed++;
-      } else {
-        stats.completed++;
-        if (company.fundingRounds) stats.fundingRoundsCount += company.fundingRounds.length;
-        if (company.people) stats.peopleCount += company.people.length;
+        log.warning(`Attempt ${attempt}/${maxRetries} failed for ${url}: ${company.error}`);
+        if (attempt === maxRetries) return company;
+        await randomDelay(3000, 6000);
+        continue;
       }
       await randomDelay();
-      return;
+      return company;
     } catch (error) {
-      log.warning(`Attempt ${attempt}/${maxRetries} failed for ${url}`, { error: String(error) });
+      log.warning(`Attempt ${attempt}/${maxRetries} errored for ${url}`, { error: String(error) });
       if (attempt === maxRetries) {
         const failed: CrunchbaseCompany = {
           url, name: url.split('/').pop() || 'Unknown',
           scrapedAt: new Date().toISOString(),
-          error: `Failed after ${maxRetries} attempts`,
+          error: `Failed after ${maxRetries} attempts: ${error instanceof Error ? error.message : String(error)}`,
         };
-        await Actor.pushData(failed);
-        stats.failed++;
-        return;
+        return failed;
       }
-      await randomDelay(TIMING.retryDelay, TIMING.retryDelay * 2);
+      await randomDelay(3000, 6000);
     }
   }
+  throw new Error('Unreachable');
 }
 
 function updateStats(company: CrunchbaseCompany, stats: RunStats): void {
@@ -202,5 +207,42 @@ async function sendWebhook(webhookUrl: string, stats: RunStats): Promise<void> {
     if (!resp.ok) log.warning('Webhook failed', { status: resp.status });
   } catch (e) {
     log.warning('Webhook error', { error: String(e) });
+  }
+}
+
+async function writeCsvOutput(companies: CrunchbaseCompany[]): Promise<void> {
+  try {
+    const headers = [
+      'url', 'name', 'description', 'website', 'crunchbaseRank', 'foundedDate',
+      'employeeCount', 'city', 'region', 'country', 'operatingStatus',
+      'lastFundingType', 'lastFundingDate', 'lastFundingAmount', 'totalFundingAmount',
+      'numFundingRounds', 'numInvestors', 'revenueRange', 'contactEmail',
+      'growthScore', 'monthlyVisits', 'trafficRank',
+    ];
+
+    const headerRow = headers.join(',');
+    const csvRows = [headerRow];
+
+    for (const c of companies) {
+      const row = headers.map(h => {
+        let val: any;
+        if (h === 'city') val = c.headquarters?.city;
+        else if (h === 'region') val = c.headquarters?.region;
+        else if (h === 'country') val = c.headquarters?.country;
+        else val = (c as any)[h];
+        const str = val === undefined || val === null ? '' : String(val);
+        if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+          return `"${str.replace(/"/g, '""')}"`;
+        }
+        return str;
+      }).join(',');
+      csvRows.push(row);
+    }
+
+    const csv = csvRows.join('\n');
+    await Actor.setValue('OUTPUT.csv', csv, { contentType: 'text/csv' });
+    log.info(`CSV output written: ${companies.length} companies`);
+  } catch (err) {
+    log.warning('Failed to write CSV', { error: String(err) });
   }
 }

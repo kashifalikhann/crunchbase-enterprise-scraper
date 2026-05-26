@@ -1,7 +1,5 @@
 export const CRUNCHBASE_URL = 'https://www.crunchbase.com';
 export const CRUNCHBASE_API_URL = 'https://api.crunchbase.com/api/v4';
-export const CAPSOLVER_API_URL = 'https://api.capsolver.com';
-export const GOOGLE_SEARCH_URL = 'https://www.google.com/search';
 
 export const USER_AGENTS = [
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -13,10 +11,6 @@ export const USER_AGENTS = [
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:123.0) Gecko/20100101 Firefox/123.0',
 ];
 
-export const CAPSOLVER_POLL_INTERVAL = 2000;
-export const CAPSOLVER_MAX_POLL_TIME = 180_000;
-export const CAPSOLVER_MIN_SCORE = 0.3;
-
 export const TIMING = {
   minDelay: 1000,
   maxDelay: 3000,
@@ -26,7 +20,6 @@ export const TIMING = {
 
 export const MAX_RETRIES = 3;
 export const DEFAULT_CONCURRENCY = 5;
-export const MAX_COMPANIES = 500;
 export const MAX_PAGES_PER_SEARCH = 10;
 
 export const API_FIELD_IDS = [

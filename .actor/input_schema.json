@@ -6,41 +6,29 @@
     "mode": {
       "title": "Scraping Mode",
       "type": "string",
-      "description": "urls: scrape specific company URLs. search: find companies by filters.",
+      "description": "urls: scrape specific company URLs. search: find companies by filters and scrape them. hybrid: search then scrape additional results.",
       "default": "urls",
-      "enum": ["urls", "search"],
-      "enumTitles": ["URLs only", "Search only"]
+      "enum": ["urls", "search", "hybrid"],
+      "enumTitles": ["URLs only", "Search only", "Hybrid (search + scrape all)"]
     },
     "startUrls": {
       "title": "Company URLs",
       "type": "array",
       "description": "Crunchbase company URLs to scrape (for urls mode). Supports organization, company, or person URLs.",
-      "editor": "requestListSources"
+      "editor": "requestListSources",
+      "prefill": [{ "url": "https://www.crunchbase.com/organization/apple" }]
     },
     "searchQueries": {
       "title": "Search Keywords",
       "type": "array",
-      "description": "Search Crunchbase by keyword (for search mode). Combine with filters below. Uses official API (if key provided) or discover page (if CapSolver).",
+      "description": "Search Crunchbase by keyword (for search or hybrid mode). Combine with filters below.",
       "editor": "stringList",
       "prefill": ["AI startup"]
     },
-    "capsolverApiKey": {
-      "title": "CapSolver API Key",
-      "type": "string",
-      "description": "CapSolver API key for Cloudflare Turnstile bypass. Get from https://dashboard.capsolver.com. After solving, the actor makes direct HTTP API calls without a browser — faster and cheaper.",
-      "editor": "textfield",
-      "isSecret": true
-    },
-    "capsolverProxy": {
-      "title": "CapSolver Proxy",
-      "type": "string",
-      "description": "Optional proxy for CapSolver (format: http://user:pass@host:port). Uses Apify proxy by default.",
-      "editor": "textfield"
-    },
     "crunchbaseApiKey": {
-      "title": "Crunchbase API Key",
+      "title": "Crunchbase API Key (optional)",
       "type": "string",
-      "description": "Optional Crunchbase API v4 key for authorized access. Get from https://www.crunchbase.com/settings/api ($49/mo Basic plan required). When set, search uses the official API which bypasses Cloudflare entirely.",
+      "description": "Optional Crunchbase API v4 key from https://www.crunchbase.com/settings/api ($49/mo Basic plan). When set, uses the official API which is faster and more reliable. Without it, the actor uses Playwright browser with stealth anti-detection (free, works around Cloudflare).",
       "editor": "textfield",
       "isSecret": true
     },

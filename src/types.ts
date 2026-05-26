@@ -1,5 +1,5 @@
 export interface Input {
-  mode: 'search' | 'urls';
+  mode: 'search' | 'urls' | 'hybrid';
 
   startUrls?: { url: string }[];
   searchQueries?: string[];
@@ -21,8 +21,6 @@ export interface Input {
   extractInvestors?: boolean;
   extractContacts?: boolean;
 
-  capsolverApiKey?: string;
-  capsolverProxy?: string;
   crunchbaseApiKey?: string;
 
   proxyConfiguration?: {
@@ -100,7 +98,7 @@ export interface CrunchbaseCompany {
 
   scrapedAt: string;
   error?: string;
-  source?: 'official_api' | 'session_api' | 'nextdata';
+  source?: 'official_api' | 'browser';
 }
 
 export interface Address {

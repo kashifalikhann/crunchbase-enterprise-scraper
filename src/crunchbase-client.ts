@@ -1,9 +1,13 @@
+import { log } from 'apify';
 import { CRUNCHBASE_URL, CRUNCHBASE_API_URL, API_FIELD_IDS, TIMING } from './constants.js';
-import { SearchResult, CompanySearchFilters, CrunchbaseCompany, FundingRound, Person, Investor } from './types.js';
+import { SearchResult, CompanySearchFilters, CrunchbaseCompany, Person } from './types.js';
 import { getRandomUserAgent, httpFetch, getSlugFromUrl, buildCookieHeader, extractCookiesFromResponse, parseApiEntityProperties, buildSocialLinks } from './utils.js';
-import { extractNextDataFromHtml, parseNextDataCompanyProps, parseNextDataFundingRounds, parseNextDataPeople, parseNextDataInvestors, parseNextDataSimilarCompanies, RawCompanyProperties } from './nextdata.js';
+import { extractNextDataFromHtml, parseNextDataCompanyProps, parseNextDataFundingRounds, parseNextDataPeople, parseNextDataInvestors, parseNextDataSimilarCompanies, parseNextDataTechStack, RawCompanyProperties } from './nextdata.js';
+import { tryBrowserRetrieve } from './browser-launcher.js';
 
-export type ClientAuth = { type: 'session'; cookies: Record<string, string> } | { type: 'api_key'; key: string } | { type: 'none' };
+export type ClientAuth =
+  | { type: 'api_key'; key: string }
+  | { type: 'none' };
 
 export class CrunchbaseClient {
   private auth: ClientAuth;
@@ -13,9 +17,6 @@ export class CrunchbaseClient {
   constructor(auth: ClientAuth, userAgent?: string) {
     this.auth = auth;
     this.userAgent = userAgent || getRandomUserAgent();
-    if (auth.type === 'session') {
-      this.baseCookies = { ...auth.cookies };
-    }
   }
 
   private async fetch(url: string, opts: RequestInit = {}): Promise<Response> {
@@ -44,36 +45,6 @@ export class CrunchbaseClient {
     return resp;
   }
 
-  private async apiFetch(path: string, opts: RequestInit = {}): Promise<Response> {
-    const url = `${CRUNCHBASE_API_URL}${path}`;
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
-      'User-Agent': this.userAgent,
-      ...(opts.headers as Record<string, string> || {}),
-    };
-    if (this.auth.type === 'api_key' || this.auth.type === 'session') {
-      if (this.auth.type === 'session') {
-        headers['X-Requested-With'] = 'XMLHttpRequest';
-      }
-    }
-    return this.fetch(url, { ...opts, headers });
-  }
-
-  async searchCompanies(filters: CompanySearchFilters, maxResults: number = 50): Promise<SearchResult[]> {
-    if (this.auth.type === 'api_key') {
-      const results = await this.searchViaOfficialApi(filters, maxResults);
-      if (results.length > 0) return results;
-    }
-
-    if (this.auth.type === 'session') {
-      const results = await this.searchViaDiscoverPage(filters, maxResults);
-      if (results.length > 0) return results;
-    }
-
-    return [];
-  }
-
   async getCompany(slugOrUrl: string): Promise<{
     company: CrunchbaseCompany;
     nextData?: any;
@@ -85,115 +56,138 @@ export class CrunchbaseClient {
       if (apiResult) return { company: apiResult };
     }
 
-    if (this.auth.type === 'session') {
-      const sessionResult = await this.getCompanyViaSession(slug);
-      if (sessionResult) return sessionResult;
-    }
-
-    const directResult = await this.getCompanyViaDirectFetch(slug);
-    if (directResult) return directResult;
+    const browserResult = await this.getCompanyViaBrowser(slug);
+    if (browserResult) return browserResult;
 
     return {
       company: {
         url: `https://www.crunchbase.com/organization/${slug}`,
         name: slug,
         scrapedAt: new Date().toISOString(),
-        error: 'Failed to fetch company data',
+        error: 'Failed to fetch company data — all methods exhausted',
       },
     };
   }
 
-  private async getCompanyViaDirectFetch(slug: string): Promise<{ company: CrunchbaseCompany; nextData?: any } | null> {
+  private async getCompanyViaBrowser(slug: string): Promise<{ company: CrunchbaseCompany; nextData?: any } | null> {
     try {
       const url = `${CRUNCHBASE_URL}/organization/${slug}`;
-      const resp = await this.fetch(url);
+      const result = await tryBrowserRetrieve(url);
+      if (!result) return null;
 
-      if (!resp.ok) return null;
+      const { html, cookies } = result;
+      Object.assign(this.baseCookies, cookies);
 
-      const html = await resp.text();
-      const nextData = extractNextDataFromHtml(html);
-      if (!nextData) return null;
-
-      const props = parseNextDataCompanyProps(nextData);
-      if (!props) return null;
-
-      return {
-        company: this.buildCompanyFromProps(props, url, 'direct'),
-        nextData,
-      };
-    } catch {
+      const parsed = this.parseCompanyFromHtml(html, url, 'browser');
+      if (!parsed) {
+        log.warning(`Browser got page but no __NEXT_DATA__ for ${slug}`);
+        return null;
+      }
+      return parsed;
+    } catch (err) {
+      log.warning(`Browser extraction failed for ${slug}: ${err instanceof Error ? err.message : String(err)}`);
       return null;
     }
   }
 
-  private async getCompanyViaSession(slug: string): Promise<{ company: CrunchbaseCompany; nextData?: any } | null> {
-    const url = `${CRUNCHBASE_URL}/organization/${slug}`;
+  parseCompanyFromHtml(
+    html: string,
+    url: string,
+    source: 'browser' = 'browser',
+  ): { company: CrunchbaseCompany; nextData?: any } | null {
+    if (html.includes('Just a moment') || html.includes('Checking your browser')) {
+      return null;
+    }
+
+    const nextData = extractNextDataFromHtml(html);
+    if (!nextData) return null;
+
+    const props = parseNextDataCompanyProps(nextData);
+    if (!props) return null;
+
+    const company = this.buildCompanyFromProps(props, url, source);
+
+    const fundingData = parseNextDataFundingRounds(nextData);
+    if (fundingData.length > 0) {
+      company.fundingRounds = fundingData.map(r => ({
+        name: r.type || r.name,
+        date: r.announced_on,
+        type: r.type,
+        amount: r.money_raised_usd,
+        valuation: r.pre_money_valuation_usd || r.post_money_valuation_usd,
+        leadInvestors: r.lead_investors?.map(i => i?.identifier?.value).filter(Boolean) as string[],
+        investors: r.investors?.map(i => i?.identifier?.value).filter(Boolean) as string[],
+      }));
+    }
+
+    const investors = parseNextDataInvestors(nextData);
+    if (investors.length > 0) {
+      company.investors = investors.map(i => ({
+        name: i.name,
+        type: i.type,
+      }));
+    }
+
+    const founders = parseNextDataPeople(nextData, 'founders');
+    const executives = parseNextDataPeople(nextData, 'executives');
+    const board = parseNextDataPeople(nextData, 'board_members_and_advisors');
+    const allPeople: Person[] = [];
+    founders.forEach(f => allPeople.push({ name: f.name || '', title: f.title, type: 'founder' }));
+    executives.forEach(f => allPeople.push({ name: f.name || '', title: f.title, type: 'executive' }));
+    board.forEach(f => allPeople.push({ name: f.name || '', title: f.title, type: 'board' }));
+    if (allPeople.length > 0) company.people = allPeople;
+    if (founders.length > 0) company.founders = founders.map(f => f.name).filter(Boolean) as string[];
+
+    const similar = parseNextDataSimilarCompanies(nextData);
+    if (similar.length > 0) {
+      company.similarCompanies = similar.map(s => ({
+        name: s.name,
+        url: s.permalink ? `${CRUNCHBASE_URL}/organization/${s.permalink}` : '',
+      }));
+    }
+
+    const techStack = parseNextDataTechStack(nextData);
+    if (techStack.length > 0) {
+      company.technologies = techStack;
+    }
+
+    return { company, nextData };
+  }
+
+  async searchCompanies(filters: CompanySearchFilters, maxResults: number = 50): Promise<SearchResult[]> {
+    if (this.auth.type === 'api_key') {
+      const results = await this.searchViaOfficialApi(filters, maxResults);
+      if (results.length > 0) return results;
+    }
+
+    const browserResults = await this.searchViaBrowser(filters, maxResults);
+    if (browserResults.length > 0) return browserResults;
+
+    return [];
+  }
+
+  private async searchViaBrowser(filters: CompanySearchFilters, maxResults: number): Promise<SearchResult[]> {
     try {
-      const resp = await this.fetch(url);
+      const params = new URLSearchParams();
+      if (filters.query) params.set('q', filters.query);
+      if (filters.industry) params.set('industry_group', filters.industry);
+      if (filters.fundingStage) params.set('last_funding_type', filters.fundingStage);
+      if (filters.employeeCount) params.set('employee_count', filters.employeeCount);
+      params.set('layout', 'table');
 
-      if (!resp.ok) {
-        if (resp.status === 403 || resp.status === 503) {
-          return null;
-        }
-        return null;
-      }
+      const url = `${CRUNCHBASE_URL}/discover/organization?${params.toString()}`;
+      const result = await tryBrowserRetrieve(url);
+      if (!result) return [];
 
-      const html = await resp.text();
-
-      if (html.includes('Just a moment') || html.includes('Checking your browser')) {
-        return null;
-      }
+      const { html } = result;
+      if (html.includes('Just a moment') || html.includes('Checking your browser')) return [];
 
       const nextData = extractNextDataFromHtml(html);
-      if (!nextData) return null;
+      if (!nextData) return [];
 
-      const props = parseNextDataCompanyProps(nextData);
-      if (!props) return null;
-
-      const company = this.buildCompanyFromProps(props, url, 'session');
-
-      const fundingData = parseNextDataFundingRounds(nextData);
-      if (fundingData.length > 0) {
-        company.fundingRounds = fundingData.map(r => ({
-          name: r.type || r.name,
-          date: r.announced_on,
-          type: r.type,
-          amount: r.money_raised_usd,
-          valuation: r.pre_money_valuation_usd || r.post_money_valuation_usd,
-          leadInvestors: r.lead_investors?.map(i => i?.identifier?.value).filter(Boolean) as string[],
-          investors: r.investors?.map(i => i?.identifier?.value).filter(Boolean) as string[],
-        }));
-      }
-
-      const investors = parseNextDataInvestors(nextData);
-      if (investors.length > 0) {
-        company.investors = investors.map(i => ({
-          name: i.name,
-          type: i.type,
-        }));
-      }
-
-      const founders = parseNextDataPeople(nextData, 'founders');
-      const executives = parseNextDataPeople(nextData, 'executives');
-      const board = parseNextDataPeople(nextData, 'board_members_and_advisors');
-      const allPeople: Person[] = [];
-      founders.forEach(f => allPeople.push({ name: f.name || '', title: f.title, type: 'founder' }));
-      executives.forEach(f => allPeople.push({ name: f.name || '', title: f.title, type: 'executive' }));
-      board.forEach(f => allPeople.push({ name: f.name || '', title: f.title, type: 'board' }));
-      if (allPeople.length > 0) company.people = allPeople;
-      if (founders.length > 0) company.founders = founders.map(f => f.name).filter(Boolean) as string[];
-
-      const similar = parseNextDataSimilarCompanies(nextData);
-      if (similar.length > 0) {
-        company.similarCompanies = similar.map(s => ({
-          name: s.name,
-          url: s.permalink ? `${CRUNCHBASE_URL}/organization/${s.permalink}` : '',
-        }));
-      }
-
-      return { company, nextData };
+      return this.extractSearchResultsFromNextData(nextData).slice(0, maxResults);
     } catch {
-      return null;
+      return [];
     }
   }
 
@@ -212,8 +206,7 @@ export class CrunchbaseClient {
       const props = parseApiEntityProperties(json);
       if (!props || !props.name) return null;
 
-      const crunchbaseUrl = `${CRUNCHBASE_URL}/organization/${slug}`;
-      return this.buildCompanyFromProps(props, crunchbaseUrl, 'api');
+      return this.buildCompanyFromProps(props, `${CRUNCHBASE_URL}/organization/${slug}`, 'api');
     } catch {
       return null;
     }
@@ -228,6 +221,17 @@ export class CrunchbaseClient {
     } catch {
       return null;
     }
+  }
+
+  private async apiFetch(path: string, opts: RequestInit = {}): Promise<Response> {
+    const url = `${CRUNCHBASE_API_URL}${path}`;
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      'User-Agent': this.userAgent,
+      ...(opts.headers as Record<string, string> || {}),
+    };
+    return this.fetch(url, { ...opts, headers });
   }
 
   private async searchViaOfficialApi(filters: CompanySearchFilters, maxResults: number): Promise<SearchResult[]> {
@@ -276,33 +280,6 @@ export class CrunchbaseClient {
     }
   }
 
-  private async searchViaDiscoverPage(filters: CompanySearchFilters, maxResults: number): Promise<SearchResult[]> {
-    try {
-      const params = new URLSearchParams();
-      if (filters.query) params.set('q', filters.query);
-      if (filters.industry) params.set('industry_group', filters.industry);
-      if (filters.fundingStage) params.set('last_funding_type', filters.fundingStage);
-      if (filters.employeeCount) params.set('employee_count', filters.employeeCount);
-      params.set('layout', 'table');
-
-      const url = `${CRUNCHBASE_URL}/discover/organization?${params.toString()}`;
-      const resp = await this.fetch(url);
-
-      if (!resp.ok) return [];
-
-      const html = await resp.text();
-      if (html.includes('Just a moment') || html.includes('Checking your browser')) return [];
-
-      const nextData = extractNextDataFromHtml(html);
-      if (!nextData) return [];
-
-      const results = this.extractSearchResultsFromNextData(nextData);
-      return results.slice(0, maxResults);
-    } catch {
-      return [];
-    }
-  }
-
   private extractSearchResultsFromNextData(nextData: any): SearchResult[] {
     try {
       const results: SearchResult[] = [];
@@ -338,12 +315,12 @@ export class CrunchbaseClient {
     }
   }
 
-  private buildCompanyFromProps(props: RawCompanyProperties | Record<string, any>, url: string, source: 'session' | 'api' | 'direct'): CrunchbaseCompany {
+  private buildCompanyFromProps(props: RawCompanyProperties | Record<string, any>, url: string, source: 'api' | 'browser'): CrunchbaseCompany {
     const company: CrunchbaseCompany = {
       url,
       name: props.name || url.split('/').pop() || 'Unknown',
       scrapedAt: new Date().toISOString(),
-      source: source === 'session' ? 'nextdata' : source === 'api' ? 'official_api' : 'nextdata',
+      source: source === 'api' ? 'official_api' : 'browser',
     };
 
     company.legalName = props.legal_name;

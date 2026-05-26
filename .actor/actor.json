@@ -2,15 +2,15 @@
   "actorSpecification": 1,
   "name": "crunchbase-enterprise-scraper",
   "title": "Crunchbase Enterprise Scraper",
-  "description": "Enterprise-grade Crunchbase scraper — CapSolver-powered Cloudflare bypass, official API support, 65+ data fields, direct API extraction, checkpoint resume, and webhook notifications.",
-  "version": "2.0",
-  "meta": {
-    "generatedBy": "Claude Code with big-pickle"
-  },
+  "description": "Enterprise-grade Crunchbase scraper — Playwright stealth browser for Cloudflare bypass, official API support (optional), 65+ data fields, funding history, team extraction, tech stack, competitor intelligence, checkpoint resume, CSV output, and webhook notifications.",
+  "version": "2.1.0",
   "input": "./input_schema.json",
   "output": "./output_schema.json",
   "storages": {
     "dataset": "./dataset_schema.json"
   },
-  "dockerfile": "../Dockerfile"
+  "dockerfile": "../Dockerfile",
+  "proxy": {
+    "useApifyProxy": true
+  }
 }

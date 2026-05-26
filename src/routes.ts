@@ -51,12 +51,34 @@ export async function handleSearch(
     if (!allSearchResults.some(ex => ex.url === r.url)) allSearchResults.push(r);
   }
 
-  for (const result of results.slice(0, maxResults)) {
-    if (allCompanies.length >= maxResults) break;
+  const targetCount = input.mode === 'hybrid'
+    ? Math.min(results.length, maxResults)
+    : Math.min(results.length, maxResults);
+
+  for (const result of results.slice(0, targetCount)) {
+    if (allCompanies.length >= targetCount) break;
     await randomDelay(TIMING.minDelay, TIMING.maxDelay);
     const company = await handleCompanyUrl(client, result.url, input);
     allCompanies.push(company);
   }
 
   return { companies: allCompanies, searchResults: allSearchResults };
+}
+
+export async function handleHybrid(
+  client: CrunchbaseClient,
+  extraResults: SearchResult[],
+  input: Input,
+  maxCount: number,
+): Promise<CrunchbaseCompany[]> {
+  const companies: CrunchbaseCompany[] = [];
+
+  for (const result of extraResults.slice(0, maxCount)) {
+    if (companies.length >= maxCount) break;
+    await randomDelay(TIMING.minDelay, TIMING.maxDelay);
+    const company = await handleCompanyUrl(client, result.url, input);
+    companies.push(company);
+  }
+
+  return companies;
 }

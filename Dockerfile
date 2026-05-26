@@ -1,7 +1,7 @@
-FROM apify/actor-node:20
+FROM apify/actor-node-playwright-chrome:20
 
 COPY --chown=myuser package.json package-lock.json ./
-RUN npm ci --no-audit --no-fund --production
+RUN npm install --no-audit --no-fund
 
 COPY --chown=myuser . ./
 RUN npm run build
