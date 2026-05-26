@@ -1,9 +1,12 @@
 import { Actor, log } from 'apify';
 import { chromium, Browser, BrowserContext, Page } from 'playwright';
+import { CRUNCHBASE_COOKIES_KEY } from './constants.js';
 
 let browser: Browser | null = null;
 let context: BrowserContext | null = null;
 let proxyContext: BrowserContext | null = null;
+
+let storedCookies: Record<string, any>[] | null = null;
 
 export async function getOrLaunchBrowser(): Promise<Browser> {
   if (!browser) await launchBrowser();
@@ -51,6 +54,63 @@ export async function launchBrowser(_proxyUrl?: string): Promise<void> {
     Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
     Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
   });
+}
+
+export async function loadCrunchbaseCookies(): Promise<void> {
+  storedCookies = await Actor.getValue(CRUNCHBASE_COOKIES_KEY);
+  if (storedCookies && Array.isArray(storedCookies) && storedCookies.length > 0) {
+    const names = storedCookies.filter(c => c.name).map(c => c.name);
+    log.info(`Loaded ${storedCookies.length} Crunchbase cookies from KV store: ${names.join(', ')}`);
+  } else {
+    storedCookies = null;
+    log.info('No Crunchbase cookies found in KV store');
+  }
+}
+
+export function getCrunchbaseCookies(): Record<string, any>[] | null {
+  return storedCookies;
+}
+
+function normalizeCookie(c: Record<string, any>): Parameters<BrowserContext['addCookies']>[0][number] {
+  const out: any = { name: c.name, value: c.value };
+  if (c.url) out.url = c.url;
+  if (c.domain) out.domain = c.domain;
+  out.path = c.path || '/';
+  const expires = c.expires || c.expirationDate;
+  if (expires) out.expires = Math.floor(expires);
+  if (c.httpOnly !== undefined) out.httpOnly = c.httpOnly;
+  if (c.secure !== undefined) out.secure = c.secure;
+  if (c.sameSite && c.sameSite !== 'unspecified') {
+    const map: Record<string, string> = {
+      'no_restriction': 'None', 'lax': 'Lax', 'strict': 'Strict',
+      'None': 'None', 'Lax': 'Lax', 'Strict': 'Strict',
+    };
+    const s = map[c.sameSite] || map[c.sameSite.toLowerCase()];
+    if (s) out.sameSite = s;
+  }
+  return out;
+}
+
+export async function injectCookiesToContext(ctx: BrowserContext): Promise<boolean> {
+  if (!storedCookies || storedCookies.length === 0) return false;
+  try {
+    const normalized = storedCookies.filter(c => c.name && c.value).map(normalizeCookie);
+    if (normalized.length === 0) return false;
+    await ctx.addCookies(normalized);
+    log.info(`Injected ${normalized.length} cookies into browser context`);
+    return true;
+  } catch (err) {
+    log.warning(`Failed to inject cookies: ${err instanceof Error ? err.message : String(err)}`);
+    return false;
+  }
+}
+
+export async function injectCookiesToMainContext(): Promise<void> {
+  if (!context) {
+    log.warning('Cannot inject cookies — main context not yet created');
+    return;
+  }
+  await injectCookiesToContext(context);
 }
 
 export async function tryBrowserRetrieve(
@@ -108,7 +168,12 @@ export async function tryBrowserRetrieve(
       log.info(`Page loaded: status ${resp.status()} for ${url.substring(0, 80)}`);
 
       if (resp.status() === 403 || resp.status() === 429) {
-        log.warning(`Attempt ${attempt}: HTTP ${resp.status()} — will retry`);
+        const hasCookies = storedCookies && storedCookies.length > 0;
+        if (hasCookies && resp.status() === 403) {
+          log.warning(`Attempt ${attempt}: HTTP 403 despite loaded cookies — they may be expired. Upload fresh cookies to KV store key "${CRUNCHBASE_COOKIES_KEY}"`);
+        } else {
+          log.warning(`Attempt ${attempt}: HTTP ${resp.status()} — will retry`);
+        }
         await page.close();
         page = null;
         const delay = attempt * 5000;
@@ -193,6 +258,8 @@ export async function fetchCrunchbaseViaProxy(url: string): Promise<string | nul
         },
         ignoreHTTPSErrors: true,
       });
+
+      await injectCookiesToContext(proxyContext);
     }
 
     const resp = await proxyContext.request.get(url, { timeout: 30000 });

@@ -6,7 +6,7 @@
 
 Extract comprehensive company intelligence from Crunchbase at scale. 65+ data fields per company including funding history, leadership team, investors, technology stack, and competitive landscape.
 
-**No paid API keys required** — uses Playwright stealth browser to bypass Cloudflare. Optionally supports Crunchbase's official API v4 if available.
+**No paid API keys required** — uses Playwright stealth browser with optional cookie-based Cloudflare bypass. Optionally supports Crunchbase's official API v4 if available.
 
 ## Features
 
@@ -17,6 +17,7 @@ Extract comprehensive company intelligence from Crunchbase at scale. 65+ data fi
 - **Tech Stack** — Technology categories used by the company
 - **Competitor Intelligence** — Similar companies and direct competitors
 - **Investor Network** — List of investors with types and lead status
+- **Cookie Cloudflare Bypass** — Upload daily cookies to KV store for instant Cloudflare clearance (no proxy needed)
 - **Smart Retry** — Automatic retry with exponential backoff (configurable)
 - **Stealth Browser** — Playwright with anti-detection, Cloudflare Turnstile blocking
 - **Checkpoint Resume** — Survives restarts without re-scraping completed URLs
@@ -106,10 +107,34 @@ apify call <actor-id> -i '{
 - **Sales Intelligence** — Enrich CRM with company profiles, tech stack, and team data
 - **M&A Advisory** — Identify acquisition targets and track deal activity
 
+## Cookie-Based Cloudflare Bypass
+
+The most reliable way to bypass Cloudflare: **upload your browser's Crunchbase cookies once daily**.
+
+### How it works
+
+1. Open `https://www.crunchbase.com` in your **regular desktop browser** (Chrome, Firefox, etc.)
+2. If Cloudflare shows a challenge, solve it (one-time — you're a real human)
+3. Use a cookie export extension (e.g. "Cookie-Editor" for Chrome) to export **all cookies**
+4. Upload the exported JSON array to the Actor's key-value store with key `CRUNCHBASE_COOKIES`
+
+### Where to upload
+
+Storage → Key-Value Store → (your actor's default store) → **Add Record**
+
+| Key | Value |
+|-----|-------|
+| `CRUNCHBASE_COOKIES` | Paste the full JSON array from Cookie-Editor |
+
+The actor reads these cookies on every run and injects them into Playwright's browser context. Crunchbase sees a valid Cloudflare clearance token and serves data directly — no proxy needed, no CAPTCHA for the scraper.
+
+> **Tip**: `cf_clearance` cookies typically last 24h. Upload fresh cookies daily before your scraping run. The actor logs a clear warning when cookies are expired.
+
 ## How It Works
 
 1. If you provide a Crunchbase API key — uses the official API v4 (fastest, most reliable)
-2. No API key — launches a headless Playwright Chromium browser with stealth anti-detection:
+2. No API key — loads Crunchbase cookies from KV store (if available), launches a headless Playwright Chromium browser with stealth anti-detection:
+   - Injects uploaded cookies for instant Cloudflare clearance
    - Blocks Cloudflare Turnstile and challenge scripts at the network level
    - Overrides `navigator.webdriver`, sets realistic viewport/locale/timezone
    - Waits for `__NEXT_DATA__` to appear before extracting

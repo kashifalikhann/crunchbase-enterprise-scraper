@@ -72,17 +72,34 @@ export class CrunchbaseClient {
   private async getCompanyViaBrowser(slug: string): Promise<{ company: CrunchbaseCompany; nextData?: any } | null> {
     try {
       const url = `${CRUNCHBASE_URL}/organization/${slug}`;
-      const html = await fetchCrunchbaseViaProxy(url);
-      if (!html) return null;
 
-      const parsed = this.parseCompanyFromHtml(html, url, 'browser');
-      if (!parsed) {
-        log.warning(`Proxy fetch got page but no __NEXT_DATA__ for ${slug}`);
-        return null;
+      const directResult = await tryBrowserRetrieve(url, 2, undefined, 45000, true);
+      if (directResult) {
+        const parsed = this.parseCompanyFromHtml(directResult.html, url, 'browser');
+        if (parsed) return parsed;
+        log.warning(`Direct browser got page but no __NEXT_DATA__ for ${slug}`);
       }
-      return parsed;
+
+      const html = await fetchCrunchbaseViaProxy(url);
+      if (html) {
+        const parsed = this.parseCompanyFromHtml(html, url, 'browser');
+        if (parsed) return parsed;
+        log.warning(`Proxy/direct fetch got page but no __NEXT_DATA__ for ${slug}`);
+      }
+
+      log.info(`Trying Wayback Machine for ${slug}`);
+      const waybackUrl = `https://web.archive.org/web/20260527000000/${url}`;
+      const result = await tryBrowserRetrieve(waybackUrl, 2, undefined, 30000, true);
+      if (result) {
+        const parsed = this.parseCompanyFromHtml(result.html, url, 'browser');
+        if (parsed) return parsed;
+        log.warning(`Wayback Machine loaded but no __NEXT_DATA__ for ${slug}`);
+      }
+
+      log.warning(`All methods exhausted for ${slug}`);
+      return null;
     } catch (err) {
-      log.warning(`Proxy fetch failed for ${slug}: ${err instanceof Error ? err.message : String(err)}`);
+      log.warning(`Browser fetch failed for ${slug}: ${err instanceof Error ? err.message : String(err)}`);
       return null;
     }
   }

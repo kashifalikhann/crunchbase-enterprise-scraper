@@ -19,6 +19,8 @@ export const TIMING = {
 };
 
 export const MAX_RETRIES = 3;
+
+export const CRUNCHBASE_COOKIES_KEY = 'CRUNCHBASE_COOKIES';
 export const DEFAULT_CONCURRENCY = 5;
 export const MAX_PAGES_PER_SEARCH = 10;
 

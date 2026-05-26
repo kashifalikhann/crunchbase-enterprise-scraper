@@ -28,7 +28,7 @@
     "crunchbaseApiKey": {
       "title": "Crunchbase API Key (optional)",
       "type": "string",
-      "description": "Optional Crunchbase API v4 key from https://www.crunchbase.com/settings/api ($49/mo Basic plan). When set, uses the official API which is faster and more reliable. Without it, the actor uses Playwright browser with stealth anti-detection (free, works around Cloudflare).",
+      "description": "Optional Crunchbase API v4 key from https://www.crunchbase.com/settings/api ($49/mo Basic plan). When set, uses the official API which is faster and more reliable. Without it, the actor uses Playwright browser with optional cookie-based Cloudflare bypass — upload your Crunchbase browser cookies to KV store key CRUNCHBASE_COOKIES for instant clearance (see README).",
       "editor": "textfield",
       "isSecret": true
     },

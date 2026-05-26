@@ -2,7 +2,7 @@ import { Actor, log } from 'apify';
 import { Input, CrunchbaseCompany } from './types.js';
 import { handleCompanyUrl, handleSearch, handleHybrid } from './routes.js';
 import { CrunchbaseClient, ClientAuth } from './crunchbase-client.js';
-import { launchBrowser, closeBrowser } from './browser-launcher.js';
+import { launchBrowser, closeBrowser, loadCrunchbaseCookies, injectCookiesToMainContext } from './browser-launcher.js';
 import { MAX_RETRIES, CRUNCHBASE_URL } from './constants.js';
 import { randomDelay, getRandomUserAgent } from './utils.js';
 
@@ -59,6 +59,8 @@ Actor.main(async () => {
 
     if (auth.type === 'none') {
       await launchBrowser();
+      await loadCrunchbaseCookies();
+      await injectCookiesToMainContext();
     }
 
     const client = new CrunchbaseClient(auth, getRandomUserAgent());
