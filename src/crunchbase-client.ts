@@ -208,19 +208,13 @@ export class CrunchbaseClient {
     if (!query) return [];
     try {
       const searchUrl = `https://www.google.com/search?q=site:crunchbase.com/organization+${encodeURIComponent(query)}`;
-      const resp = await httpFetch(searchUrl, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.9',
-        },
-      });
-      if (!resp.ok) {
-        log.warning(`Google search returned ${resp.status}`);
+      const result = await tryBrowserRetrieve(searchUrl, 2, undefined, 30000);
+      if (!result) {
+        log.warning('Google search via browser returned no result');
         return [];
       }
 
-      const html = await resp.text();
+      const { html } = result;
       log.info(`Google search returned ${html.length} bytes`);
 
       const results: SearchResult[] = [];
@@ -233,8 +227,13 @@ export class CrunchbaseClient {
         if (seen.has(url)) continue;
         seen.add(url);
 
-        const slug = getSlugFromUrl(url);
-        results.push({ name: slug, url, shortDescription: undefined });
+        const ctx = html.substring(Math.max(0, match.index - 150), match.index + 250);
+        const nameMatch = ctx.match(/<h3[^>]*>(.*?)<\/h3>/);
+        const name = nameMatch
+          ? nameMatch[1].replace(/<[^>]+>/g, '').trim()
+          : getSlugFromUrl(url);
+
+        results.push({ name, url, shortDescription: undefined });
       }
 
       log.info(`Google search found ${results.length} Crunchbase URLs`);
