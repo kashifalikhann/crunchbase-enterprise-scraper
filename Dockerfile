@@ -4,8 +4,8 @@ FROM apify/actor-node-playwright-chrome:20
 # Copy package files
 COPY --chown=myuser package.json package-lock.json ./
 
-# Install dependencies with clean install
-RUN npm ci --only=production --no-audit --no-fund
+# Install all dependencies (typescript needed for build)
+RUN npm ci --no-audit --no-fund
 
 # Copy source code
 COPY --chown=myuser . ./
