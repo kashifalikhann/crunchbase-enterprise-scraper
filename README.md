@@ -6,7 +6,7 @@
 
 Extract comprehensive company intelligence from Crunchbase at scale. 65+ data fields per company including funding history, leadership team, investors, technology stack, and competitive landscape.
 
-**No paid API keys required** — uses Playwright stealth browser with optional cookie-based Cloudflare bypass. Optionally supports Crunchbase's official API v4 if available.
+**No paid API keys required** — uses Capsolver for automated Cloudflare Turnstile bypass with Playwright stealth browser. Optionally supports Crunchbase's official API v4 and cookie-based bypass as fallback.
 
 ## Features
 
@@ -17,7 +17,8 @@ Extract comprehensive company intelligence from Crunchbase at scale. 65+ data fi
 - **Tech Stack** — Technology categories used by the company
 - **Competitor Intelligence** — Similar companies and direct competitors
 - **Investor Network** — List of investors with types and lead status
-- **Cookie Cloudflare Bypass** — Upload daily cookies to KV store for instant Cloudflare clearance (no proxy needed)
+- **Capsolver Cloudflare Bypass** — Automated Turnstile solving via Capsolver API (~$1.50/1k companies)
+- **Cookie Fallback** — Upload daily cookies to KV store for instant Cloudflare clearance
 - **Smart Retry** — Automatic retry with exponential backoff (configurable)
 - **Stealth Browser** — Playwright with anti-detection, Cloudflare Turnstile blocking
 - **Checkpoint Resume** — Survives restarts without re-scraping completed URLs
@@ -41,6 +42,7 @@ Extract comprehensive company intelligence from Crunchbase at scale. 65+ data fi
 | `extractSimilarCompanies` | bool | `true` | Extract similar companies |
 | `extractInvestors` | bool | `true` | Extract investor information |
 | `crunchbaseApiKey` | string | — | Optional Crunchbase API v4 key (paid) |
+| `capsolverApiKey` | string | — | Capsolver key for Cloudflare Turnstile bypass (~$1/1k solves) |
 | `maxRetries` | int | `3` | Retry attempts per URL |
 | `webhookUrl` | string | — | Progress notification webhook |
 | `outputFormat` | enum | `json` | Output format: `json` or `csv` |
@@ -107,40 +109,42 @@ apify call <actor-id> -i '{
 - **Sales Intelligence** — Enrich CRM with company profiles, tech stack, and team data
 - **M&A Advisory** — Identify acquisition targets and track deal activity
 
-## Cookie-Based Cloudflare Bypass
+## Cloudflare Bypass
 
-The most reliable way to bypass Cloudflare: **upload your browser's Crunchbase cookies once daily**.
+Crunchbase uses Cloudflare Turnstile to block automated access. This actor supports two bypass strategies:
 
-### How it works
+### 1. Capsolver (Recommended — Automated)
 
-1. Open `https://www.crunchbase.com` in your **regular desktop browser** (Chrome, Firefox, etc.)
-2. If Cloudflare shows a challenge, solve it (one-time — you're a real human)
-3. Use a cookie export extension (e.g. "Cookie-Editor" for Chrome) to export **all cookies**
-4. Upload the exported JSON array to the Actor's key-value store with key `CRUNCHBASE_COOKIES`
+[Capsolver](https://dashboard.capsolver.com) solves Cloudflare Turnstile challenges programmatically. No manual intervention needed.
 
-### Where to upload
+1. Sign up at [dashboard.capsolver.com](https://dashboard.capsolver.com) and top up (minimum ~$3)
+2. Copy your API key from the dashboard
+3. Set the `capsolverApiKey` input parameter
 
-Storage → Key-Value Store → (your actor's default store) → **Add Record**
+**Cost**: ~$0.001/solve (Turnstile) → ~$0.0015/company (avg 1.5 solves) → ~$1.50/1k companies
+
+### 2. Cookie Fallback (Free — Manual)
+
+Upload your browser's Crunchbase cookies once daily for a free (but manual) bypass.
+
+1. Open `https://www.crunchbase.com` in your regular desktop browser
+2. If Cloudflare shows a challenge, solve it manually
+3. Use a cookie export extension (e.g. "Cookie-Editor" for Chrome) to export all cookies as JSON
+4. Upload to the Actor's key-value store with key `CRUNCHBASE_COOKIES`
 
 | Key | Value |
 |-----|-------|
-| `CRUNCHBASE_COOKIES` | Paste the full JSON array from Cookie-Editor |
+| `CRUNCHBASE_COOKIES` | Full JSON array from Cookie-Editor |
 
-The actor reads these cookies on every run and injects them into Playwright's browser context. Crunchbase sees a valid Cloudflare clearance token and serves data directly — no proxy needed, no CAPTCHA for the scraper.
-
-> **Tip**: `cf_clearance` cookies typically last 24h. Upload fresh cookies daily before your scraping run. The actor logs a clear warning when cookies are expired.
+> **Tip**: `cf_clearance` cookies last ~24h. Upload fresh cookies daily. The actor warns when cookies are expired.
 
 ## How It Works
 
 1. If you provide a Crunchbase API key — uses the official API v4 (fastest, most reliable)
-2. No API key — loads Crunchbase cookies from KV store (if available), launches a headless Playwright Chromium browser with stealth anti-detection:
-   - Injects uploaded cookies for instant Cloudflare clearance
-   - Blocks Cloudflare Turnstile and challenge scripts at the network level
-   - Overrides `navigator.webdriver`, sets realistic viewport/locale/timezone
-   - Waits for `__NEXT_DATA__` to appear before extracting
-   - Reuses browser session across requests for efficiency
-3. Extracts structured data from `__NEXT_DATA__` JSON embedded in the page
-4. Falls back to official API if browser fails (when API key is configured)
+2. No API key but Capsolver configured — launches headless Playwright browser. When Cloudflare Turnstile blocks the request, Capsolver solves it automatically and injects the clearance token. Retries with valid clearance.
+3. No API key, no Capsolver, but cookies available — injects stored cookies from KV store for Cloudflare clearance
+4. All methods — extracts structured data from `__NEXT_DATA__` JSON embedded in the page
+5. Falls back to official API if browser fails (when API key is configured)
 
 ## Performance
 

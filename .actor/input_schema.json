@@ -28,7 +28,14 @@
     "crunchbaseApiKey": {
       "title": "Crunchbase API Key (optional)",
       "type": "string",
-      "description": "Optional Crunchbase API v4 key from https://www.crunchbase.com/settings/api ($49/mo Basic plan). When set, uses the official API which is faster and more reliable. Without it, the actor uses Playwright browser with optional cookie-based Cloudflare bypass — upload your Crunchbase browser cookies to KV store key CRUNCHBASE_COOKIES for instant clearance (see README).",
+      "description": "Optional Crunchbase API v4 key from https://www.crunchbase.com/settings/api ($49/mo Basic plan). When set, uses the official API which is faster and more reliable. Without it, the actor uses Playwright browser with Capsolver for automated Cloudflare Turnstile bypass.",
+      "editor": "textfield",
+      "isSecret": true
+    },
+    "capsolverApiKey": {
+      "title": "Capsolver API Key (optional)",
+      "type": "string",
+      "description": "Required for automated Cloudflare bypass when no Crunchbase API key is set. Get your key at https://dashboard.capsolver.com. Cost: ~$1/1k Turnstile solves (~$1.50/1k companies). Without this, browser scraping will likely fail on Cloudflare-protected pages.",
       "editor": "textfield",
       "isSecret": true
     },

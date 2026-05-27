@@ -1,6 +1,7 @@
 import { Actor, log } from 'apify';
 import { chromium, Browser, BrowserContext, Page } from 'playwright';
 import { CRUNCHBASE_COOKIES_KEY } from './constants.js';
+import { solveTurnstileChallenge } from './capsolver.js';
 
 let browser: Browser | null = null;
 let context: BrowserContext | null = null;
@@ -113,6 +114,12 @@ export async function injectCookiesToMainContext(): Promise<void> {
   await injectCookiesToContext(context);
 }
 
+let capsolverApiKey: string | null = null;
+
+export function setCapsolverApiKey(key: string | null): void {
+  capsolverApiKey = key;
+}
+
 export async function tryBrowserRetrieve(
   url: string,
   retries = 3,
@@ -169,7 +176,25 @@ export async function tryBrowserRetrieve(
 
       if (resp.status() === 403 || resp.status() === 429) {
         const hasCookies = storedCookies && storedCookies.length > 0;
-        if (hasCookies && resp.status() === 403) {
+
+        if (resp.status() === 403 && capsolverApiKey) {
+          log.info(`Attempt ${attempt}: HTTP 403 — attempting Capsolver Turnstile bypass`);
+          const solved = await solveTurnstileChallenge(capsolverApiKey, url, page);
+          if (solved) {
+            const html = await page.content().catch(() => '');
+            if (html.includes('__NEXT_DATA__') || !requireNextData) {
+              log.info(`Capsolver bypass succeeded on attempt ${attempt}`);
+              const cookies = await page.context().cookies();
+              const cookieMap: Record<string, string> = {};
+              for (const c of cookies) cookieMap[c.name] = c.value;
+              await page.close();
+              return { html, cookies: cookieMap };
+            }
+            log.info('Capsolver bypass completed but no __NEXT_DATA__ — retrying navigation');
+            continue;
+          }
+          log.warning('Capsolver bypass failed — will retry without it');
+        } else if (hasCookies && resp.status() === 403) {
           log.warning(`Attempt ${attempt}: HTTP 403 despite loaded cookies — they may be expired. Upload fresh cookies to KV store key "${CRUNCHBASE_COOKIES_KEY}"`);
         } else {
           log.warning(`Attempt ${attempt}: HTTP ${resp.status()} — will retry`);

@@ -2,7 +2,7 @@ import { Actor, log } from 'apify';
 import { Input, CrunchbaseCompany } from './types.js';
 import { handleCompanyUrl, handleSearch, handleHybrid } from './routes.js';
 import { CrunchbaseClient, ClientAuth } from './crunchbase-client.js';
-import { launchBrowser, closeBrowser, loadCrunchbaseCookies, injectCookiesToMainContext } from './browser-launcher.js';
+import { launchBrowser, closeBrowser, loadCrunchbaseCookies, injectCookiesToMainContext, setCapsolverApiKey } from './browser-launcher.js';
 import { MAX_RETRIES, CRUNCHBASE_URL } from './constants.js';
 import { randomDelay, getRandomUserAgent } from './utils.js';
 
@@ -25,11 +25,12 @@ Actor.main(async () => {
     return;
   }
 
-  log.info('Crunchbase Enterprise Scraper starting', {
-    mode: input.mode,
-    maxCompanies: input.maxCompanies || 'unlimited',
-    hasApiKey: !!input.crunchbaseApiKey,
-  });
+    log.info('Crunchbase Enterprise Scraper starting', {
+      mode: input.mode,
+      maxCompanies: input.maxCompanies || 'unlimited',
+      hasApiKey: !!input.crunchbaseApiKey,
+      hasCapsolver: !!input.capsolverApiKey,
+    });
 
   const stats: RunStats = {
     totalUrls: 0,
@@ -58,6 +59,10 @@ Actor.main(async () => {
       : { type: 'none' };
 
     if (auth.type === 'none') {
+      if (input.capsolverApiKey) {
+        setCapsolverApiKey(input.capsolverApiKey);
+        log.info('Capsolver API key configured for automated Cloudflare bypass');
+      }
       await launchBrowser();
       await loadCrunchbaseCookies();
       await injectCookiesToMainContext();

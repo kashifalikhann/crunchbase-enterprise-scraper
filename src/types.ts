@@ -22,6 +22,7 @@ export interface Input {
   extractContacts?: boolean;
 
   crunchbaseApiKey?: string;
+  capsolverApiKey?: string;
 
   proxyConfiguration?: {
     useApifyProxy?: boolean;

@@ -24,6 +24,12 @@ export const CRUNCHBASE_COOKIES_KEY = 'CRUNCHBASE_COOKIES';
 export const DEFAULT_CONCURRENCY = 5;
 export const MAX_PAGES_PER_SEARCH = 10;
 
+export const CAPSOLVER_BASE_URL = 'https://api.capsolver.com';
+export const CAPSOLVER_CREATE_TASK_URL = 'https://api.capsolver.com/createTask';
+export const CAPSOLVER_GET_RESULT_URL = 'https://api.capsolver.com/getTaskResult';
+export const CAPSOLVER_POLL_INTERVAL_MS = 2000;
+export const CAPSOLVER_MAX_POLL_SECONDS = 120;
+
 export const API_FIELD_IDS = [
   'name', 'legal_name', 'short_description', 'description',
   'website', 'logo_url', 'rank_org', 'rank_company',
