@@ -25,11 +25,14 @@ Actor.main(async () => {
     return;
   }
 
+      const envApiKey = process.env['CRUNCHBASE_API_KEY'] || '';
+    const envCapsolverKey = process.env['CAPSOLVER_API_KEY'] || '';
+
     log.info('Crunchbase Enterprise Scraper starting', {
       mode: input.mode,
       maxCompanies: input.maxCompanies || 'unlimited',
-      hasApiKey: !!input.crunchbaseApiKey,
-      hasCapsolver: !!input.capsolverApiKey,
+      hasApiKey: !!envApiKey,
+      hasCapsolver: !!envCapsolverKey,
     });
 
   const stats: RunStats = {
@@ -54,13 +57,13 @@ Actor.main(async () => {
   }
 
   try {
-    const auth: ClientAuth = input.crunchbaseApiKey
-      ? { type: 'api_key', key: input.crunchbaseApiKey }
+    const auth: ClientAuth = envApiKey
+      ? { type: 'api_key', key: envApiKey }
       : { type: 'none' };
 
     if (auth.type === 'none') {
-      if (input.capsolverApiKey) {
-        setCapsolverApiKey(input.capsolverApiKey);
+      if (envCapsolverKey) {
+        setCapsolverApiKey(envCapsolverKey);
         log.info('Capsolver API key configured for automated Cloudflare bypass');
       }
       await launchBrowser();

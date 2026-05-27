@@ -41,8 +41,7 @@ Extract comprehensive company intelligence from Crunchbase at scale. 65+ data fi
 | `extractTechStack` | bool | `true` | Extract technology stack |
 | `extractSimilarCompanies` | bool | `true` | Extract similar companies |
 | `extractInvestors` | bool | `true` | Extract investor information |
-| `crunchbaseApiKey` | string | — | Optional Crunchbase API v4 key (paid) |
-| `capsolverApiKey` | string | — | Capsolver key for Cloudflare Turnstile bypass (~$1/1k solves) |
+
 | `maxRetries` | int | `3` | Retry attempts per URL |
 | `webhookUrl` | string | — | Progress notification webhook |
 | `outputFormat` | enum | `json` | Output format: `json` or `csv` |
@@ -119,7 +118,7 @@ Crunchbase uses Cloudflare Turnstile to block automated access. This actor suppo
 
 1. Sign up at [dashboard.capsolver.com](https://dashboard.capsolver.com) and top up (minimum ~$3)
 2. Copy your API key from the dashboard
-3. Set the `capsolverApiKey` input parameter
+3. Go to Actor **Settings → Secrets** in Apify Console and add `CAPSOLVER_API_KEY` as an environment secret
 
 **Cost**: ~$0.001/solve (Turnstile) → ~$0.0015/company (avg 1.5 solves) → ~$1.50/1k companies
 

@@ -21,9 +21,6 @@ export interface Input {
   extractInvestors?: boolean;
   extractContacts?: boolean;
 
-  crunchbaseApiKey?: string;
-  capsolverApiKey?: string;
-
   proxyConfiguration?: {
     useApifyProxy?: boolean;
     apifyProxyGroups?: string[];
