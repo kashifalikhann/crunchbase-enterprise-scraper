@@ -3,7 +3,7 @@
   "name": "crunchbase-enterprise-scraper",
   "title": "Crunchbase Enterprise Scraper",
   "description": "Enterprise-grade Crunchbase scraper — Playwright stealth browser with cookie-based Cloudflare bypass (upload browser cookies for instant clearance), official API support (optional), 65+ data fields, funding history, team extraction, tech stack, competitor intelligence, checkpoint resume, CSV output, and webhook notifications.",
-  "version": "2.1",
+  "version": "3.0",
   "input": "./input_schema.json",
   "output": "./output_schema.json",
   "storages": {

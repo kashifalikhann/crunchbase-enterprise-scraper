@@ -1,10 +1,14 @@
 import { Actor, log } from 'apify';
+import { PlaywrightCrawler, Dataset } from 'crawlee';
 import { Input, CrunchbaseCompany } from './types.js';
-import { handleCompanyUrl, handleSearch, handleHybrid } from './routes.js';
-import { CrunchbaseClient, ClientAuth } from './crunchbase-client.js';
-import { launchBrowser, closeBrowser, loadCrunchbaseCookies, injectCookiesToMainContext, setCapsolverApiKey } from './browser-launcher.js';
-import { MAX_RETRIES, CRUNCHBASE_URL } from './constants.js';
-import { randomDelay, getRandomUserAgent } from './utils.js';
+import { parseCompanyFromHtml, buildCompanyFromProps } from './parse-company.js';
+import { searchCrunchbase } from './search.js';
+import { loadCrunchbaseCookies, getCrunchbaseCookies, normalizeCookie } from './browser-launcher.js';
+import { solveTurnstileChallenge } from './capsolver.js';
+import { CRUNCHBASE_URL, CRUNCHBASE_API_URL, API_FIELD_IDS } from './constants.js';
+import { getRandomUserAgent, parseApiEntityProperties, getSlugFromUrl } from './utils.js';
+
+const CHECKPOINT_KEY = 'CHECKPOINT';
 
 interface RunStats {
   totalUrls: number;
@@ -16,188 +20,312 @@ interface RunStats {
   peopleCount: number;
 }
 
-const CHECKPOINT_KEY = 'CHECKPOINT';
-
 Actor.main(async () => {
   const input = await Actor.getInput<Input>();
-  if (!input) {
-    log.error('No input provided');
-    return;
-  }
+  if (!input) { log.error('No input provided'); return; }
 
-      const envApiKey = process.env['CRUNCHBASE_API_KEY'] || '';
-    const envCapsolverKey = process.env['CAPSOLVER_API_KEY'] || '';
+  const envApiKey = process.env['CRUNCHBASE_API_KEY'] || '';
+  const envCapsolverKey = process.env['CAPSOLVER_API_KEY'] || '';
 
-    log.info('Crunchbase Enterprise Scraper starting', {
-      mode: input.mode,
-      maxCompanies: input.maxCompanies || 'unlimited',
-      hasApiKey: !!envApiKey,
-      hasCapsolver: !!envCapsolverKey,
-    });
+  log.info('Crunchbase Enterprise Scraper starting', {
+    mode: input.mode,
+    maxCompanies: input.maxCompanies || 'unlimited',
+    hasApiKey: !!envApiKey,
+    hasCapsolver: !!envCapsolverKey,
+  });
+
+  const webhookUrl = input?.webhookUrl;
 
   const stats: RunStats = {
-    totalUrls: 0,
-    completed: 0,
-    failed: 0,
-    startTime: Date.now(),
-    searchResultsCount: 0,
-    fundingRoundsCount: 0,
-    peopleCount: 0,
+    totalUrls: 0, completed: 0, failed: 0, startTime: Date.now(),
+    searchResultsCount: 0, fundingRoundsCount: 0, peopleCount: 0,
   };
 
-  const maxRetries = input.maxRetries || MAX_RETRIES;
-  const webhookUrl = input?.webhookUrl;
   const allCompanies: CrunchbaseCompany[] = [];
-
   const processedUrls = new Set<string>();
+
   const checkpoint = await Actor.getValue<{ processedUrls: string[] }>(CHECKPOINT_KEY).catch(() => null);
   if (checkpoint?.processedUrls) {
     checkpoint.processedUrls.forEach(u => processedUrls.add(u));
     log.info(`Resuming from checkpoint: ${processedUrls.size} already processed`);
   }
 
-  try {
-    const auth: ClientAuth = envApiKey
-      ? { type: 'api_key', key: envApiKey }
-      : { type: 'none' };
+  if (!envApiKey) {
+    await loadCrunchbaseCookies();
+  }
 
-    if (auth.type === 'none') {
-      if (envCapsolverKey) {
-        setCapsolverApiKey(envCapsolverKey);
-        log.info('Capsolver API key configured for automated Cloudflare bypass');
-      }
-      await launchBrowser();
-      await loadCrunchbaseCookies();
-      await injectCookiesToMainContext();
-    }
+  // ---- Phase 1: Search (for search/hybrid mode) ----
+  let urlsToScrape: string[] = [];
 
-    const client = new CrunchbaseClient(auth, getRandomUserAgent());
-
-    if (input.mode === 'search' || input.mode === 'hybrid') {
-      log.info(`${input.mode} mode: ${input.searchQueries?.join(', ') || 'all'}`, {
+  if (input.mode === 'search' || input.mode === 'hybrid') {
+    const maxResults = Math.min(input.maxCompanies || 50, 500);
+    log.info(`${input.mode} mode: searching Crunchbase`);
+    const results = await searchCrunchbase(
+      {
+        query: input.searchQueries?.[0] || '',
         location: input.location,
         industry: input.industry,
         fundingStage: input.fundingStage,
-      });
+        employeeCount: input.employeeCount,
+      },
+      maxResults,
+      { apiKey: envApiKey, userAgent: getRandomUserAgent() },
+    );
 
-      const { companies, searchResults } = await handleSearch(client, input);
-      stats.searchResultsCount = searchResults.length;
-
-      for (const company of companies) {
-        if (processedUrls.has(company.url)) continue;
-        await Actor.pushData(company);
-        allCompanies.push(company);
-        processedUrls.add(company.url);
-        updateStats(company, stats);
-      }
-      stats.completed = companies.filter(c => !c.error).length;
-      stats.failed = companies.filter(c => c.error).length;
-
-      if (input.mode === 'hybrid') {
-        const maxCompanies = input.maxCompanies || 50;
-        const extraNeeded = maxCompanies - companies.length;
-        if (extraNeeded > 0 && searchResults.length > companies.length) {
-          log.info(`Hybrid: scraping ${Math.min(extraNeeded, searchResults.length - companies.length)} additional companies from search results`);
-          const extraCompanies = await handleHybrid(
-            client, searchResults.slice(companies.length),
-            input, extraNeeded,
-          );
-          for (const company of extraCompanies) {
-            await Actor.pushData(company);
-            allCompanies.push(company);
-            updateStats(company, stats);
-          }
-          stats.completed = allCompanies.filter(c => !c.error).length;
-          stats.failed = allCompanies.filter(c => c.error).length;
-        }
-      }
-    }
-
-    if (input.mode === 'urls') {
-      const rawUrls = (input.startUrls || []).map(u => typeof u === 'string' ? u : u.url).filter(Boolean);
-      stats.totalUrls = rawUrls.length;
-      log.info(`URL mode: ${rawUrls.length} URLs (${processedUrls.size} already processed)`);
-
-      for (let i = 0; i < rawUrls.length; i++) {
-        const url = rawUrls[i];
-        if (processedUrls.has(url)) continue;
-
-        const company = await processUrlWithRetry(client, url, input, maxRetries);
-        await Actor.pushData(company);
-        allCompanies.push(company);
-        processedUrls.add(url);
-        if (company.error) stats.failed++;
-        else {
-          stats.completed++;
-          if (company.fundingRounds) stats.fundingRoundsCount += company.fundingRounds.length;
-          if (company.people) stats.peopleCount += company.people.length;
-        }
-
-        if (processedUrls.size % 10 === 0) {
-          await saveCheckpoint([...processedUrls]);
-          if (webhookUrl) await sendWebhook(webhookUrl, stats);
-        }
-      }
-    }
-
-    if (input.outputFormat === 'csv') {
-      await writeCsvOutput(allCompanies);
-    }
-
-    const duration = ((Date.now() - stats.startTime) / 1000).toFixed(1);
-    log.info('Scraping completed', { ...stats, durationSeconds: duration });
-
-    await Actor.setValue('STATS', {
-      ...stats,
-      durationSeconds: parseFloat(duration),
-      completedAt: new Date().toISOString(),
-      mode: input.mode,
-    });
-
-  } catch (error) {
-    log.error('Fatal error', { error: String(error) });
-    throw error;
-  } finally {
-    await closeBrowser();
+    stats.searchResultsCount = results.length;
+    log.info(`Search found ${results.length} companies`);
+    urlsToScrape = results.map(r => r.url);
   }
+
+  if (input.mode === 'urls' || input.mode === 'hybrid') {
+    const manualUrls = (input.startUrls || []).map(u => typeof u === 'string' ? u : u.url).filter(Boolean);
+    if (input.mode === 'hybrid') {
+      urlsToScrape = [...new Set([...urlsToScrape, ...manualUrls])];
+    } else {
+      urlsToScrape = manualUrls;
+    }
+  }
+
+  // Filter out already-processed URLs and cap to maxCompanies
+  const maxCompanies = input.maxCompanies || 500;
+  const pendingUrls = urlsToScrape.filter(u => !processedUrls.has(u)).slice(0, maxCompanies);
+  stats.totalUrls = pendingUrls.length;
+
+  if (pendingUrls.length === 0) {
+    log.info('No URLs to scrape');
+    return;
+  }
+
+  // ---- Phase 2: Crawlee PlaywrightCrawler ----
+  const proxyConfiguration = await Actor.createProxyConfiguration({
+    groups: ['RESIDENTIAL'],
+  });
+
+  const crawler = new PlaywrightCrawler({
+    proxyConfiguration,
+    useSessionPool: true,
+    sessionPoolOptions: {
+      maxPoolSize: 10,
+      sessionOptions: {
+        maxUsageCount: 15,
+      },
+    },
+    maxConcurrency: input.concurrency || 5,
+    maxRequestsPerCrawl: maxCompanies,
+
+    launchContext: {
+      launchOptions: {
+        headless: true,
+        args: [
+          '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
+          '--disable-blink-features=AutomationControlled',
+          '--disable-web-security',
+          '--disable-features=IsolateOrigins,site-per-process',
+          '--no-first-run',
+          '--no-default-browser-check',
+          '--disable-component-update',
+        ],
+      },
+    },
+
+    preNavigationHooks: [
+      async ({ page }) => {
+        const cookies = getCrunchbaseCookies();
+        if (cookies?.length) {
+          await page.context().addCookies(cookies.filter(c => c.name && c.value).map(normalizeCookie));
+        }
+        await page.addInitScript(() => {
+          Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+          Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+          Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+        });
+      },
+    ],
+
+    requestHandler: async ({ page, request }) => {
+      if (processedUrls.has(request.url)) return;
+
+      // Try official API first if key available
+      if (envApiKey) {
+        const slug = getSlugFromUrl(request.url);
+        const apiCompany = await getCompanyViaApi(slug, envApiKey, request.url);
+        if (apiCompany) {
+          await Dataset.pushData(apiCompany);
+          allCompanies.push(apiCompany);
+          processedUrls.add(request.url);
+          stats.completed++;
+          if (apiCompany.fundingRounds) stats.fundingRoundsCount += apiCompany.fundingRounds.length;
+          if (apiCompany.people) stats.peopleCount += apiCompany.people.length;
+          return;
+        }
+      }
+
+      let html: string | null = null;
+      const maxAttempts = (input.maxRetries || 3) + 1;
+
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        try {
+          const response = await page.goto(request.url, {
+            waitUntil: 'domcontentloaded',
+            timeout: 45000,
+          });
+
+          if (response && (response.status() === 403 || response.status() === 429)) {
+            if (response.status() === 403 && envCapsolverKey) {
+              log.info(`Attempt ${attempt}: HTTP 403 — solving via Capsolver`);
+              const solved = await solveTurnstileChallenge(envCapsolverKey, request.url, page);
+              if (solved) {
+                log.info(`Capsolver bypass succeeded on attempt ${attempt}`);
+              } else {
+                log.warning('Capsolver bypass failed');
+              }
+            }
+            if (attempt < maxAttempts) {
+              await new Promise(r => setTimeout(r, attempt * 5000));
+              continue;
+            }
+          }
+
+          const resolvedUrl = page.url();
+          const onCrunchbase = resolvedUrl.includes('crunchbase.com/organization/');
+
+          if (!onCrunchbase && !resolvedUrl.includes('web.archive.org')) {
+            log.warning(`Attempt ${attempt}: unexpected redirect to ${resolvedUrl.substring(0, 80)}`);
+            if (attempt < maxAttempts) {
+              await new Promise(r => setTimeout(r, 3000));
+              continue;
+            }
+          }
+
+          try {
+            await page.waitForSelector('script#__NEXT_DATA__', { timeout: 15000 });
+          } catch {
+            log.warning(`Attempt ${attempt}: __NEXT_DATA__ not found within timeout`);
+          }
+
+          html = await page.content();
+
+          if (!html.includes('__NEXT_DATA__')) {
+            log.warning(`Attempt ${attempt}: no __NEXT_DATA__ in HTML (length ${html.length})`);
+            if (attempt < maxAttempts) {
+              html = null;
+              await new Promise(r => setTimeout(r, 3000));
+              continue;
+            }
+          }
+        } catch (err) {
+          log.warning(`Attempt ${attempt} error: ${err instanceof Error ? err.message : String(err)}`);
+          if (attempt < maxAttempts) {
+            await new Promise(r => setTimeout(r, 3000));
+          }
+        }
+      }
+
+      if (!html) {
+        log.warning(`Failed to scrape ${request.url}`);
+        stats.failed++;
+        processedUrls.add(request.url);
+        return;
+      }
+
+      const result = parseCompanyFromHtml(html, request.url);
+      if (!result) {
+        log.warning(`Failed to parse company from ${request.url}`);
+        stats.failed++;
+        processedUrls.add(request.url);
+        return;
+      }
+
+      const company = result.company;
+
+      if (input.extractFunding === false) delete company.fundingRounds;
+      if (input.extractPeople === false) { delete company.people; delete company.founders; }
+      if (input.maxFundingRounds && company.fundingRounds && company.fundingRounds.length > input.maxFundingRounds) {
+        company.fundingRounds = company.fundingRounds.slice(0, input.maxFundingRounds);
+      }
+
+      await Dataset.pushData(company);
+      allCompanies.push(company);
+      processedUrls.add(request.url);
+      stats.completed++;
+      if (company.fundingRounds) stats.fundingRoundsCount += company.fundingRounds.length;
+      if (company.people) stats.peopleCount += company.people.length;
+
+      if (stats.completed % 10 === 0) {
+        await saveCheckpoint([...processedUrls]);
+        if (webhookUrl) await sendWebhook(webhookUrl, stats);
+      }
+    },
+
+    failedRequestHandler: async ({ request }) => {
+      log.warning(`Scraping failed for ${request.url}`);
+      processedUrls.add(request.url);
+      stats.failed++;
+    },
+  });
+
+  await crawler.run(pendingUrls.map(url => ({ url })));
+
+  // ---- Phase 3: Output ----
+  if (input.outputFormat === 'csv') {
+    await writeCsvOutput(allCompanies);
+  }
+
+  const duration = ((Date.now() - stats.startTime) / 1000).toFixed(1);
+  log.info('Scraping completed', { ...stats, durationSeconds: duration });
+
+  await Actor.setValue('STATS', {
+    ...stats,
+    durationSeconds: parseFloat(duration),
+    completedAt: new Date().toISOString(),
+    mode: input.mode,
+  });
 });
 
-async function processUrlWithRetry(
-  client: CrunchbaseClient,
-  url: string,
-  input: Input,
-  maxRetries: number,
-): Promise<CrunchbaseCompany> {
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    try {
-      const company = await handleCompanyUrl(client, url, input);
-      if (company.error) {
-        log.warning(`Attempt ${attempt}/${maxRetries} failed for ${url}: ${company.error}`);
-        if (attempt === maxRetries) return company;
-        await randomDelay(3000, 6000);
-        continue;
-      }
-      await randomDelay();
-      return company;
-    } catch (error) {
-      log.warning(`Attempt ${attempt}/${maxRetries} errored for ${url}`, { error: String(error) });
-      if (attempt === maxRetries) {
-        const failed: CrunchbaseCompany = {
-          url, name: url.split('/').pop() || 'Unknown',
-          scrapedAt: new Date().toISOString(),
-          error: `Failed after ${maxRetries} attempts: ${error instanceof Error ? error.message : String(error)}`,
-        };
-        return failed;
-      }
-      await randomDelay(3000, 6000);
-    }
+async function getCompanyViaApi(slug: string, apiKey: string, url: string): Promise<CrunchbaseCompany | null> {
+  try {
+    const uuid = await resolveSlugToUuid(slug, apiKey);
+    if (!uuid) return null;
+
+    const fieldIds = API_FIELD_IDS.join(',');
+    const resp = await fetch(`${CRUNCHBASE_API_URL}/entities/organizations/${uuid}?field_ids=${fieldIds}`, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'X-cb-user-key': apiKey,
+        'User-Agent': getRandomUserAgent(),
+      },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!resp.ok) return null;
+
+    const json = await resp.json();
+    const props = parseApiEntityProperties(json);
+    if (!props || !props.name) return null;
+
+    return buildCompanyFromProps(props, url, 'api');
+  } catch {
+    return null;
   }
-  throw new Error('Unreachable');
 }
 
-function updateStats(company: CrunchbaseCompany, stats: RunStats): void {
-  if (company.fundingRounds) stats.fundingRoundsCount += company.fundingRounds.length;
-  if (company.people) stats.peopleCount += company.people.length;
+async function resolveSlugToUuid(slug: string, apiKey: string): Promise<string | null> {
+  try {
+    const resp = await fetch(`${CRUNCHBASE_API_URL}/entities/organizations/${slug}?field_ids=name`, {
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'X-cb-user-key': apiKey,
+        'User-Agent': getRandomUserAgent(),
+      },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!resp.ok) return null;
+    const json = await resp.json();
+    return json?.uuid || null;
+  } catch {
+    return null;
+  }
 }
 
 async function saveCheckpoint(processedUrls: string[]): Promise<void> {
