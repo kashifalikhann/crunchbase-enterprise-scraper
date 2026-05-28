@@ -3,6 +3,7 @@ import { extractNextDataFromHtml } from './nextdata.js';
 import { SearchResult, CompanySearchFilters } from './types.js';
 import { CRUNCHBASE_URL, CRUNCHBASE_API_URL, API_FIELD_IDS } from './constants.js';
 import { getSlugFromUrl, getRandomUserAgent, buildCookieHeader, extractCookiesFromResponse, parseApiEntityProperties } from './utils.js';
+import { getCrunchbaseCookies, normalizeCookie } from './browser-launcher.js';
 
 interface SearchOpts {
   apiKey?: string;
@@ -23,6 +24,9 @@ export async function searchCrunchbase(
   }
 
   results = await searchDiscoverHttp(filters);
+  if (results.length > 0) return results.slice(0, maxResults);
+
+  results = await searchDiscoverBrowser(filters);
   if (results.length > 0) return results.slice(0, maxResults);
 
   results = await searchViaGoogleHttp(filters.query || '');
@@ -68,6 +72,55 @@ async function searchDiscoverHttp(filters: CompanySearchFilters): Promise<Search
     return extractSearchResultsFromNextData(nextData);
   } catch (err) {
     log.warning(`Discover search failed: ${err instanceof Error ? err.message : String(err)}`);
+    return [];
+  }
+}
+
+async function searchDiscoverBrowser(filters: CompanySearchFilters): Promise<SearchResult[]> {
+  const cookies = getCrunchbaseCookies();
+  if (!cookies?.length) {
+    log.info('No cookies for browser-based discover search, skipping');
+    return [];
+  }
+  try {
+    const { chromium } = await import('playwright');
+    const browser = await chromium.launch({
+      headless: true,
+      args: [
+        '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
+        '--disable-blink-features=AutomationControlled',
+      ],
+    });
+    const context = await browser.newContext();
+    await context.addCookies(cookies.filter(c => c.name && c.value).map(normalizeCookie));
+    const page = await context.newPage();
+
+    try {
+      const params = new URLSearchParams();
+      if (filters.query) params.set('q', filters.query);
+      if (filters.industry) params.set('industry_group', filters.industry);
+      if (filters.fundingStage) params.set('last_funding_type', filters.fundingStage);
+      if (filters.employeeCount) params.set('employee_count', filters.employeeCount);
+      params.set('layout', 'table');
+
+      const url = `${CRUNCHBASE_URL}/discover/organization?${params.toString()}`;
+      log.info(`Browser-based discover search: ${url}`);
+      await page.goto(url, { waitUntil: 'networkidle', timeout: 60000 });
+
+      const html = await page.content();
+      const nextData = extractNextDataFromHtml(html);
+      if (!nextData) {
+        log.warning('Browser discover search: no __NEXT_DATA__ found');
+        return [];
+      }
+      return extractSearchResultsFromNextData(nextData);
+    } finally {
+      await page.close();
+      await context.close();
+      await browser.close();
+    }
+  } catch (err) {
+    log.warning(`Browser discover search failed: ${err instanceof Error ? err.message : String(err)}`);
     return [];
   }
 }
