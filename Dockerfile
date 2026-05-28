@@ -1,10 +1,10 @@
 FROM apify/actor-node-playwright-chrome:20
 
-COPY --chown=node package.json package-lock.json ./
+COPY --chown=myuser package.json package-lock.json ./
 RUN npm install --no-audit --no-fund
 
-COPY --chown=node . ./
+COPY --chown=myuser . ./
 RUN npm run build
 
-USER node
+USER myuser
 CMD ["npm", "start", "--silent"]
